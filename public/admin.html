@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理后台 — StrategyReview</title>
+<link rel="stylesheet" href="/assets/css/main.css">
+<style>
+.admin-section { max-width: 700px; margin-bottom: 32px; }
+.api-key-bar {
+  display: flex; gap: 10px; margin-bottom: 24px; align-items: center; flex-wrap: wrap;
+}
+.api-key-bar input { flex: 1; min-width: 260px; }
+.status-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.status-item:last-child { border-bottom: none; }
+.status-label { color: var(--sub); }
+.col-preview-row {
+  display: flex; gap: 12px; align-items: center; padding: 8px;
+  border-radius: 8px; background: var(--bg3); margin-bottom: 6px; font-size: 12px;
+}
+.col-sel { width: 140px; }
+.col-type-badge { padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="nav-container"></div>
+
+<div class="container">
+  <h1 class="page-title">管理后台</h1>
+  <p class="page-sub">策略数据维护、每日复盘触发、系统状态</p>
+
+  <!-- API Key -->
+  <div class="card admin-section">
+    <div class="section-title">🔑 管理员密钥</div>
+    <p style="font-size:13px;color:var(--sub);margin-bottom:12px">
+      执行上传和触发操作前，请先输入管理员密钥（X-Admin-Key）。
+    </p>
+    <div class="api-key-bar">
+      <input type="password" id="admin-key-input" placeholder="输入 Admin Key"
+        class="search-input" style="font-family:monospace">
+      <button class="btn btn-gold" onclick="saveAdminKey()">保存本地</button>
+      <span id="key-status" style="font-size:12px;color:var(--sub)"></span>
+    </div>
+  </div>
+
+  <!-- 系统状态 -->
+  <div class="card admin-section">
+    <div class="section-title" style="margin-bottom:16px">📊 系统状态</div>
+    <div id="system-status">
+      <div class="loading"><div class="spinner"></div>加载中...</div>
+    </div>
+    <button class="btn btn-outline btn-sm" style="margin-top:12px" onclick="loadStatus()">刷新</button>
+  </div>
+
+  <!-- 触发每日复盘 -->
+  <div class="card admin-section">
+    <div class="section-title">🔄 触发每日复盘更新</div>
+    <p style="font-size:13px;color:var(--sub);margin-bottom:16px">
+      手动触发九宽 API 抓取，更新指定日期的市场数据。正常情况下由 Cron Worker 在 18:00 自动执行。
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <label style="font-size:13px;color:var(--sub)">日期：</label>
+      <input type="date" id="trigger-date" class="search-input" style="width:160px">
+      <button class="btn btn-gold" onclick="triggerUpdate()">▶ 立即触发</button>
+    </div>
+    <div id="trigger-result" style="margin-top:16px"></div>
+  </div>
+
+  <!-- 策略数据上传 -->
+  <div class="card admin-section">
+    <div class="section-title">📥 上传季度策略数据（Excel）</div>
+    <p style="font-size:13px;color:var(--sub);margin-bottom:16px">
+      上传策略筛选结果 Excel 文件（<code>策略筛选结果_vX.xlsx</code>）。
+      系统将自动解析列映射，计算 S1/S2/S3 标志，批量写入数据库。
+    </p>
+
+    <div class="upload-zone" id="strategy-upload-zone"
+      onclick="document.getElementById('strategy-file-input').click()">
+      <div style="font-size:32px;margin-bottom:8px">📊</div>
+      <h3>点击或拖拽上传策略 Excel</h3>
+      <p>支持 .xlsx 格式，表格需包含股票代码和策略字段</p>
+      <input type="file" id="strategy-file-input" accept=".xlsx,.xls" style="display:none"
+        onchange="onStrategyFile(event)">
+    </div>
+
+    <div id="strategy-parse-result" style="display:none;margin-top:20px">
+      <div id="strategy-preview-info" class="hl-box"></div>
+      <div id="column-mapper" style="margin-top:16px"></div>
+      <button class="btn btn-gold" id="strategy-submit-btn" style="margin-top:16px"
+        onclick="submitStrategy()">📤 确认导入</button>
+      <button class="btn btn-outline" onclick="clearStrategy()" style="margin-left:10px">取消</button>
+    </div>
+
+    <div id="strategy-result" style="display:none;margin-top:20px"></div>
+  </div>
+
+  <!-- JSON 数据导入（开发工具）-->
+  <div class="card admin-section" style="opacity:0.85">
+    <div class="section-title">🛠 开发工具：JSON 批量导入</div>
+    <p style="font-size:13px;color:var(--sub);margin-bottom:16px">
+      用于将 <code>strategy_data.json</code> 格式数据批量导入数据库（仅开发初始化使用）。
+    </p>
+    <textarea id="json-import-text" placeholder="粘贴 JSON 数组数据..."
+      style="width:100%;height:120px;background:var(--bg3);color:var(--text);border:1px solid var(--border);
+             border-radius:8px;padding:12px;font-family:monospace;font-size:11px;resize:vertical"></textarea>
+    <div style="margin-top:10px;display:flex;gap:10px">
+      <button class="btn btn-outline btn-sm" onclick="importJson()">导入 JSON</button>
+    </div>
+    <div id="json-result" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/components.js"></script>
+<script>
+document.getElementById('nav-container').innerHTML = renderNav('admin');
+initNavStatus();
+
+// 初始化日期
+document.getElementById('trigger-date').value = todayStr();
+
+// ===== Admin Key =====
+function getAdminKey() { return localStorage.getItem('sr_admin_key') || ''; }
+function saveAdminKey() {
+  const key = document.getElementById('admin-key-input').value.trim();
+  localStorage.setItem('sr_admin_key', key);
+  document.getElementById('key-status').textContent = '✅ 已保存到本地';
+  showToast('密钥已保存');
+}
+
+// 初始化时从 localStorage 填充
+const savedKey = getAdminKey();
+if (savedKey) {
+  document.getElementById('admin-key-input').value = savedKey;
+  document.getElementById('key-status').textContent = '✅ 已从本地加载';
+}
+
+// ===== 系统状态 =====
+async function loadStatus() {
+  document.getElementById('system-status').innerHTML =
+    '<div class="loading"><div class="spinner"></div>加载中...</div>';
+  try {
+    const data = await api.getStatus();
+    document.getElementById('system-status').innerHTML = `
+      <div class="status-item"><span class="status-label">API状态</span><span class="badge badge-ok">正常</span></div>
+      <div class="status-item"><span class="status-label">策略库股票数</span><span>${data.strategy_count ?? '-'}</span></div>
+      <div class="status-item"><span class="status-label">复盘记录数</span><span>${data.review_count ?? '-'}</span></div>
+      <div class="status-item"><span class="status-label">选股上传数</span><span>${data.selection_count ?? '-'}</span></div>
+      <div class="status-item"><span class="status-label">最近复盘</span><span>${data.latest_review_date ? formatDateDisplay(data.latest_review_date) : '-'}</span></div>
+      <div class="status-item"><span class="status-label">最近复盘状态</span>
+        <span class="badge ${data.latest_review_status === 'published' ? 'badge-ok' : 'badge-draft'}">${data.latest_review_status || '-'}</span>
+      </div>`;
+  } catch (e) {
+    document.getElementById('system-status').innerHTML =
+      `<div style="color:var(--red)">加载失败：${e.message}</div>`;
+  }
+}
+
+loadStatus();
+
+// ===== 触发复盘 =====
+async function triggerUpdate() {
+  const key = getAdminKey();
+  if (!key) { showToast('请先输入并保存 Admin Key', 'err'); return; }
+  const date = document.getElementById('trigger-date').value;
+  if (!date) { showToast('请选择日期', 'err'); return; }
+
+  document.getElementById('trigger-result').innerHTML = loadingHtml();
+
+  try {
+    const result = await api.triggerUpdate(date, key);
+    document.getElementById('trigger-result').innerHTML = `
+      <div class="hl-box ${result.status === 'published' ? 'success' : 'warning'}">
+        <strong>${result.status === 'published' ? '✅ 更新成功' : '⚠️ 部分失败'}</strong>
+        <div style="font-size:12px;margin-top:6px">${result.message || ''}</div>
+      </div>`;
+    loadStatus();
+  } catch (e) {
+    document.getElementById('trigger-result').innerHTML =
+      `<div class="hl-box" style="border-color:var(--red);color:var(--red)">❌ ${e.message}</div>`;
+  }
+}
+
+// ===== 策略 Excel 上传 =====
+let parsedStrategyData = [];
+
+const sZone = document.getElementById('strategy-upload-zone');
+sZone.addEventListener('dragover', e => { e.preventDefault(); sZone.classList.add('drag-over'); });
+sZone.addEventListener('dragleave', () => sZone.classList.remove('drag-over'));
+sZone.addEventListener('drop', e => {
+  e.preventDefault(); sZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) processStrategyFile(e.dataTransfer.files[0]);
+});
+
+function onStrategyFile(e) {
+  if (e.target.files[0]) processStrategyFile(e.target.files[0]);
+}
+
+function processStrategyFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (!rows.length) { showToast('文件为空', 'err'); return; }
+
+      const headers = rows[0].map(h => String(h).trim());
+      const dataRows = rows.slice(1);
+
+      parsedStrategyData = dataRows
+        .filter(r => r[0])
+        .map(r => {
+          const obj = {};
+          headers.forEach((h, i) => { obj[h] = r[i]; });
+          return obj;
+        });
+
+      document.getElementById('strategy-preview-info').innerHTML =
+        `📊 解析到 <strong>${parsedStrategyData.length}</strong> 行，${headers.length} 列。前5列：<code>${headers.slice(0,5).join(', ')}</code>`;
+
+      document.getElementById('strategy-parse-result').style.display = 'block';
+    } catch (err) {
+      showToast('文件解析失败：' + err.message, 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function submitStrategy() {
+  const key = getAdminKey();
+  if (!key) { showToast('请先输入并保存 Admin Key', 'err'); return; }
+  if (!parsedStrategyData.length) { showToast('没有解析到数据', 'err'); return; }
+
+  const btn = document.getElementById('strategy-submit-btn');
+  btn.disabled = true; btn.textContent = '⏳ 导入中...';
+
+  try {
+    const result = await api.uploadStrategy(parsedStrategyData, key);
+    document.getElementById('strategy-result').style.display = 'block';
+    document.getElementById('strategy-result').innerHTML = `
+      <div class="hl-box success">
+        ✅ <strong>导入完成</strong><br>
+        <span style="font-size:12px">成功 ${result.inserted} 条，更新 ${result.updated} 条，失败 ${result.failed} 条</span>
+      </div>`;
+    clearStrategy();
+    loadStatus();
+  } catch (e) {
+    document.getElementById('strategy-result').style.display = 'block';
+    document.getElementById('strategy-result').innerHTML =
+      `<div class="hl-box" style="border-color:var(--red)">❌ ${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '📤 确认导入';
+  }
+}
+
+function clearStrategy() {
+  parsedStrategyData = [];
+  document.getElementById('strategy-parse-result').style.display = 'none';
+  document.getElementById('strategy-file-input').value = '';
+}
+
+// ===== JSON 批量导入 =====
+async function importJson() {
+  const key = getAdminKey();
+  if (!key) { showToast('请先输入 Admin Key', 'err'); return; }
+
+  const text = document.getElementById('json-import-text').value.trim();
+  if (!text) { showToast('请粘贴 JSON 数据', 'err'); return; }
+
+  let data;
+  try { data = JSON.parse(text); } catch (e) { showToast('JSON 格式错误：' + e.message, 'err'); return; }
+  if (!Array.isArray(data)) { showToast('需要 JSON 数组格式', 'err'); return; }
+
+  document.getElementById('json-result').innerHTML = loadingHtml();
+
+  try {
+    const result = await api.uploadStrategy(data, key);
+    document.getElementById('json-result').innerHTML =
+      `<div class="hl-box success">✅ 导入 ${result.inserted + result.updated} 条（成功 ${result.inserted}，更新 ${result.updated}，失败 ${result.failed}）</div>`;
+    loadStatus();
+  } catch (e) {
+    document.getElementById('json-result').innerHTML =
+      `<div class="hl-box" style="border-color:var(--red)">❌ ${e.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>

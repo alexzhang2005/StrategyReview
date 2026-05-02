@@ -1,0 +1,10 @@
+name = "strategy-review-cron"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+account_id = "47c3a5980592adfbb54c444a42327e13"
+
+[vars]
+PAGES_BASE_URL = "https://strategy-review.pages.dev"
+
+[[triggers]]
+crons = ["0 10 * * 1-5"]

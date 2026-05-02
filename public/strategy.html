@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>选股策略 — StrategyReview</title>
+<link rel="stylesheet" href="/assets/css/main.css">
+<style>
+.strategy-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.stab-btn {
+  padding: 8px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.stab-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+.stab-btn.active-gold   { color: #000; background: var(--gold); border-color: var(--gold); }
+.stab-btn.active-blue   { color: #fff; background: var(--blue); border-color: var(--blue); }
+.stab-btn.active-green  { color: #fff; background: var(--green); border-color: var(--green); }
+.stab-btn.active-red    { color: #fff; background: var(--red); border-color: var(--red); }
+.stab-btn.active-any    { color: var(--gold); border-color: var(--gold); background: rgba(255,215,0,0.1); }
+.strategy-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.stats-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.stat-pill {
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+</style>
+</head>
+<body>
+<div id="nav-container"></div>
+
+<div class="container">
+  <h1 class="page-title">选股策略</h1>
+  <p class="page-sub">基于财报数据筛选的量化策略股池，每季度更新</p>
+
+  <!-- 策略选项卡 -->
+  <div class="strategy-tabs" id="strategy-tabs">
+    <button class="stab-btn" data-strategy="all3"  data-active="active-gold"  onclick="switchStrategy('all3',this)">🏆 三合一</button>
+    <button class="stab-btn" data-strategy="s1"    data-active="active-blue"  onclick="switchStrategy('s1',this)">📦 持股增长</button>
+    <button class="stab-btn" data-strategy="s2"    data-active="active-green" onclick="switchStrategy('s2',this)">💹 盈利质量</button>
+    <button class="stab-btn" data-strategy="s3"    data-active="active-red"   onclick="switchStrategy('s3',this)">🚀 全速前进</button>
+    <button class="stab-btn" data-strategy="any"   data-active="active-any"   onclick="switchStrategy('any',this)">✨ 全部命中</button>
+  </div>
+
+  <!-- 统计数字 -->
+  <div class="stats-row" id="stats-row">
+    <div class="loading"><div class="spinner"></div>加载中...</div>
+  </div>
+
+  <!-- 标题 + 搜索 -->
+  <div class="strategy-header">
+    <div id="strategy-title" style="font-size:16px;font-weight:700;color:var(--gold)"></div>
+    <div class="filter-row">
+      <input class="search-input" style="width:200px" id="search-input"
+        placeholder="搜索代码/名称/行业..." oninput="onSearch()">
+      <button class="btn btn-outline btn-sm" onclick="exportCsv()">📥 导出CSV</button>
+    </div>
+  </div>
+
+  <!-- 表格 -->
+  <div class="table-wrapper">
+    <table id="strategy-table">
+      <thead>
+        <tr>
+          <th data-sort="code"     data-label="代码">代码 ↑</th>
+          <th data-sort="name"     data-label="名称">名称</th>
+          <th data-sort="industry" data-label="行业">行业</th>
+          <th>策略标签</th>
+          <th data-sort="quality_count" data-label="质量分">盈利质量</th>
+          <th>增速</th>
+        </tr>
+      </thead>
+      <tbody id="strategy-body">
+        <tr><td colspan="6"><div class="loading"><div class="spinner"></div>加载中...</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="strategy-pagination"></div>
+</div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/components.js"></script>
+<script>
+document.getElementById('nav-container').innerHTML = renderNav('strategy');
+initNavStatus();
+
+let currentStrategy = 'all3';
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let sortState = { col: 'code', order: 'asc' };
+let searchTimer;
+let allStocks = [];
+let filteredStocks = [];
+
+const strategyNames = {
+  all3: '三合一策略',
+  s1: '持股增长（S1）',
+  s2: '盈利质量（S2）',
+  s3: '全速前进（S3）',
+  any: '任意策略命中',
+};
+
+const strategyDescs = {
+  all3: 'S1+S2+S3 同时命中，最强基本面信号',
+  s1: '十大股东三季度连续增持',
+  s2: 'ROE、毛利率、扣非净利三年同时递增',
+  s3: '扣非净利增速 + 营收增速双加速',
+  any: '命中一个或多个策略的全部股票',
+};
+
+// 初始化
+async function initPage() {
+  try {
+    const summary = await api.getStrategySummary();
+    const c = summary.counts || {};
+    const counts = { all3: c.all3_count, s1: c.s1_count, s2: c.s2_count, s3: c.s3_count, any: c.any_count };
+
+    document.getElementById('stats-row').innerHTML = Object.entries({
+      all3: ['🏆 三合一', 'gold'],
+      s1:   ['📦 持股增长', 'blue'],
+      s2:   ['💹 盈利质量', 'green'],
+      s3:   ['🚀 全速前进', 'red'],
+    }).map(([k, [label, color]]) => `
+      <div class="stat-pill" style="color:var(--${color})" onclick="switchStrategyByKey('${k}')">
+        ${label}: <strong>${counts[k] || 0}</strong> 只
+      </div>`).join('');
+
+    // 读取 URL 参数
+    const tab = new URLSearchParams(location.search).get('tab') || 'all3';
+    switchStrategyByKey(tab);
+  } catch (e) {
+    document.getElementById('stats-row').innerHTML = `<span style="color:var(--sub)">${e.message}</span>`;
+  }
+}
+
+function switchStrategyByKey(key) {
+  const btn = document.querySelector(`[data-strategy="${key}"]`);
+  if (btn) switchStrategy(key, btn);
+}
+
+function switchStrategy(strategy, btn) {
+  currentStrategy = strategy;
+  currentPage = 1;
+  allStocks = [];
+
+  // 更新按钮样式
+  document.querySelectorAll('.stab-btn').forEach(b => {
+    b.classList.remove('active-gold', 'active-blue', 'active-green', 'active-red', 'active-any');
+  });
+  if (btn) btn.classList.add(btn.dataset.active);
+
+  // 更新标题
+  document.getElementById('strategy-title').textContent =
+    `${strategyNames[strategy]} — ${strategyDescs[strategy]}`;
+
+  loadStocks();
+}
+
+async function loadStocks(page = 1) {
+  currentPage = page;
+  const tbody = document.getElementById('strategy-body');
+  tbody.innerHTML = `<tr><td colspan="6">${loadingHtml()}</td></tr>`;
+
+  try {
+    const data = await api.getStrategyStocks(
+      currentStrategy, page, PAGE_SIZE, sortState.col, sortState.order
+    );
+
+    allStocks = data.items || [];
+    filteredStocks = allStocks;
+    applySearch();
+
+    // 分页
+    document.getElementById('strategy-pagination').innerHTML =
+      renderPagination(data.total, page, PAGE_SIZE, 'loadStocks');
+
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6">${emptyHtml('加载失败', e.message)}</td></tr>`;
+  }
+}
+
+function applySearch() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  filteredStocks = q
+    ? allStocks.filter(s =>
+        s.code.includes(q) || (s.name || '').toLowerCase().includes(q) ||
+        (s.industry || '').toLowerCase().includes(q))
+    : allStocks;
+  renderTable();
+}
+
+function onSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applySearch, 200);
+}
+
+function renderTable() {
+  const tbody = document.getElementById('strategy-body');
+  if (!filteredStocks.length) {
+    tbody.innerHTML = `<tr><td colspan="6">${emptyHtml('没有找到匹配股票')}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filteredStocks.map(s => {
+    const parse = (v) => { try { return v ? JSON.parse(v) : []; } catch { return []; } };
+    const concepts = parse(s.concepts);
+    const conceptStr = concepts.slice(0, 2).join(' / ');
+
+    return `
+      <tr class="${s.all_3 ? 'tr-hit' : ''}">
+        <td class="stock-code">${s.code}</td>
+        <td class="stock-name" onclick="goToStock('${s.code}')" title="${s.name}">${s.name}</td>
+        <td style="color:var(--sub);font-size:12px">${s.industry || '-'}</td>
+        <td>${strategyTags(s)}</td>
+        <td>
+          <div style="font-size:12px">
+            ${s.quality_count > 0 ? `<span style="color:var(--green)">${s.quality_count}/3 项达标</span>` : '-'}
+          </div>
+        </td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${s.k_acc ? '<span class="tag tag-red" style="font-size:10px">净利加速</span>' : ''}
+            ${s.y_acc ? '<span class="tag tag-blue" style="font-size:10px">营收加速</span>' : ''}
+            ${s.s1_sub ? '<span class="tag tag-gold" style="font-size:10px">增速加速</span>' : ''}
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+// 表格排序
+document.querySelectorAll('#strategy-table th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    sortState.order = (sortState.col === col && sortState.order === 'asc') ? 'desc' : 'asc';
+    sortState.col = col;
+    document.querySelectorAll('#strategy-table th').forEach(t => {
+      t.classList.remove('th-sorted');
+      t.textContent = t.dataset.label || t.textContent.replace(/ [↑↓]$/, '');
+    });
+    th.classList.add('th-sorted');
+    th.textContent = th.dataset.label + (sortState.order === 'asc' ? ' ↑' : ' ↓');
+    loadStocks(1);
+  });
+});
+
+// 导出 CSV
+function exportCsv() {
+  if (!filteredStocks.length) { showToast('没有数据可导出', 'err'); return; }
+  const rows = [['代码', '名称', '行业', 'S1', 'S2', 'S3', '三合一']];
+  filteredStocks.forEach(s => rows.push([s.code, s.name, s.industry||'', s.s1?1:0, s.s2?1:0, s.s3?1:0, s.all_3?1:0]));
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\ufeff' + csv);
+  a.download = `strategy_${currentStrategy}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  showToast('已导出 CSV');
+}
+
+initPage();
+</script>
+</body>
+</html>

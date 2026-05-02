@@ -1,0 +1,15 @@
+{
+  "name": "strategy-review",
+  "version": "1.0.0",
+  "description": "A股策略复盘平台 - Cloudflare Pages + D1",
+  "scripts": {
+    "dev": "npx wrangler pages dev public --d1=DB",
+    "deploy": "npx wrangler pages deploy public --project-name=strategy-review",
+    "db:migrate": "npx wrangler d1 migrations apply strategy-review-db",
+    "db:seed": "node scripts/seed-from-json.js",
+    "db:local-migrate": "npx wrangler d1 migrations apply strategy-review-db --local"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

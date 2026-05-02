@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>选股列表 — StrategyReview</title>
+<link rel="stylesheet" href="/assets/css/main.css">
+<style>
+.tab-nav { display: flex; gap: 4px; margin-bottom: 24px; }
+.tab-item {
+  padding: 6px 18px; border-radius: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 600; border: 1px solid var(--border);
+  color: var(--sub); transition: all 0.2s;
+}
+.tab-item:hover { color: var(--text); }
+.tab-item.active { background: rgba(255,215,0,0.12); color: var(--gold); border-color: rgba(255,215,0,0.4); }
+.list-card {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px; cursor: pointer; transition: all 0.25s; margin-bottom: 12px;
+}
+.list-card:hover { border-color: rgba(255,215,0,0.4); }
+.list-meta { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.list-name { font-size: 16px; font-weight: 700; }
+.list-stats { display: flex; gap: 12px; font-size: 12px; color: var(--sub); margin-top: 6px; }
+.match-pct { font-size: 13px; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="nav-container"></div>
+
+<div class="container">
+  <!-- 列表视图 -->
+  <div id="list-view">
+    <h1 class="page-title">选股列表</h1>
+    <p class="page-sub">上传日度选股 Excel，自动匹配策略数据库</p>
+
+    <div class="tab-nav">
+      <div class="tab-item active" onclick="switchTab('history',this)">📋 历史列表</div>
+      <div class="tab-item" onclick="switchTab('upload',this)">📤 上传新列表</div>
+    </div>
+
+    <!-- 历史列表 -->
+    <div id="history-view">
+      <div id="lists-container">
+        <div class="loading"><div class="spinner"></div>加载中...</div>
+      </div>
+      <div id="lists-pagination"></div>
+    </div>
+
+    <!-- 上传区域 -->
+    <div id="upload-view" style="display:none">
+      <div class="card" style="max-width:600px">
+        <div class="section-title">📤 上传选股列表</div>
+        <p style="font-size:13px;color:var(--sub);margin-bottom:20px">
+          支持 .xls / .xlsx 格式。提取第1列（代码）和第2列（名称），自动与策略数据库匹配。
+        </p>
+
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+          <div style="font-size:32px;margin-bottom:8px">📄</div>
+          <h3>点击或拖拽上传 Excel 文件</h3>
+          <p>支持格式：.xls, .xlsx（最大 10MB）</p>
+          <input type="file" id="file-input" accept=".xls,.xlsx" style="display:none" onchange="onFileSelect(event)">
+        </div>
+
+        <div id="upload-preview" style="display:none;margin-top:20px">
+          <div class="hl-box" id="preview-info"></div>
+          <div style="max-height:300px;overflow-y:auto;margin-top:12px">
+            <div class="table-wrapper" id="preview-table"></div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:10px">
+            <button class="btn btn-gold" onclick="submitUpload()" id="submit-btn">📤 确认上传</button>
+            <button class="btn btn-outline" onclick="clearPreview()">取消</button>
+          </div>
+        </div>
+
+        <div id="upload-result" style="display:none;margin-top:20px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 详情视图 -->
+  <div id="detail-view" style="display:none">
+    <div class="back-btn" onclick="showListView()">← 返回列表</div>
+    <div id="detail-content">
+      <div class="loading"><div class="spinner"></div>加载中...</div>
+    </div>
+  </div>
+</div>
+
+<!-- SheetJS Excel 解析 -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/components.js"></script>
+<script>
+document.getElementById('nav-container').innerHTML = renderNav('selection');
+initNavStatus();
+
+let parsedStocks = [];
+let parsedFilename = '';
+
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('history-view').style.display = tab === 'history' ? 'block' : 'none';
+  document.getElementById('upload-view').style.display = tab === 'upload' ? 'block' : 'none';
+}
+
+// ===== 拖拽上传 =====
+const zone = document.getElementById('upload-zone');
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+});
+
+function onFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+}
+
+function processFile(file) {
+  if (!file.name.match(/\.(xls|xlsx)$/i)) {
+    showToast('请上传 .xls 或 .xlsx 文件', 'err');
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    showToast('文件大小不能超过 10MB', 'err');
+    return;
+  }
+
+  parsedFilename = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      // 从第2行开始（跳过表头）
+      parsedStocks = [];
+      const headerRow = rows[0] || [];
+      const dataRows = rows.slice(1);
+
+      for (const row of dataRows) {
+        const code = String(row[0] || '').trim().replace(/[^0-9]/g, '').padStart(6, '0').slice(-6);
+        const name = String(row[1] || '').trim();
+        if (code && code !== '000000' && code.length === 6) {
+          parsedStocks.push({ code, name });
+        }
+      }
+
+      if (!parsedStocks.length) {
+        showToast('未能从文件中提取有效股票代码', 'err');
+        return;
+      }
+
+      showPreview();
+    } catch (err) {
+      showToast('文件解析失败：' + err.message, 'err');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function showPreview() {
+  document.getElementById('upload-preview').style.display = 'block';
+  document.getElementById('preview-info').innerHTML =
+    `📄 文件：<strong>${parsedFilename}</strong>，共解析到 <strong>${parsedStocks.length}</strong> 只股票`;
+
+  const previewRows = parsedStocks.slice(0, 20);
+  document.getElementById('preview-table').innerHTML = `
+    <table>
+      <thead><tr><th>代码</th><th>名称</th></tr></thead>
+      <tbody>
+        ${previewRows.map(s => `<tr><td class="stock-code">${s.code}</td><td>${s.name}</td></tr>`).join('')}
+        ${parsedStocks.length > 20 ? `<tr><td colspan="2" style="color:var(--sub);text-align:center">... 还有 ${parsedStocks.length - 20} 条</td></tr>` : ''}
+      </tbody>
+    </table>`;
+}
+
+function clearPreview() {
+  parsedStocks = [];
+  parsedFilename = '';
+  document.getElementById('upload-preview').style.display = 'none';
+  document.getElementById('file-input').value = '';
+}
+
+async function submitUpload() {
+  if (!parsedStocks.length) { showToast('请先选择文件', 'err'); return; }
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 上传中...';
+
+  try {
+    const today = todayStr();
+    const listName = parsedFilename.replace(/\.[^.]+$/, '');
+    const result = await api.uploadSelection(parsedStocks, today, parsedFilename, listName);
+
+    document.getElementById('upload-result').style.display = 'block';
+    document.getElementById('upload-result').innerHTML = `
+      <div class="hl-box success">
+        ✅ ${result.message}
+        <div style="margin-top:8px">
+          <button class="btn btn-gold btn-sm" onclick="viewDetail(${result.list_id})">
+            查看匹配结果 →
+          </button>
+        </div>
+      </div>`;
+
+    clearPreview();
+    showToast('上传成功！');
+  } catch (e) {
+    showToast('上传失败：' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '📤 确认上传';
+  }
+}
+
+// ===== 历史列表 =====
+async function loadLists(page = 1) {
+  const container = document.getElementById('lists-container');
+  container.innerHTML = loadingHtml();
+
+  try {
+    const data = await api.getSelectionList(page, 10);
+    if (!data.items?.length) {
+      container.innerHTML = emptyHtml('暂无上传记录', '点击"上传新列表"添加');
+      return;
+    }
+
+    container.innerHTML = data.items.map(list => {
+      const pct = list.total_count > 0
+        ? ((list.strategy_matched / list.total_count) * 100).toFixed(1)
+        : '0';
+      return `
+        <div class="list-card" onclick="viewDetail(${list.id})">
+          <div class="list-meta">
+            <div>
+              <div class="list-name">${list.list_name || list.filename || '未命名'}</div>
+              <div class="list-stats">
+                <span>📅 ${formatDateDisplay(list.date)}</span>
+                <span>共 ${list.total_count} 只</span>
+                <span>命中 ${list.strategy_matched} 只</span>
+              </div>
+            </div>
+            <div class="match-pct" style="color:${pct > 20 ? 'var(--green)' : 'var(--sub)'}">
+              ${pct}% 命中
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    document.getElementById('lists-pagination').innerHTML =
+      renderPagination(data.total, page, 10, 'loadLists');
+
+  } catch (e) {
+    container.innerHTML = emptyHtml('加载失败', e.message);
+  }
+}
+
+// ===== 详情 =====
+async function viewDetail(listId) {
+  document.getElementById('list-view').style.display = 'none';
+  document.getElementById('detail-view').style.display = 'block';
+  window.scrollTo(0, 0);
+
+  document.getElementById('detail-content').innerHTML = loadingHtml();
+
+  try {
+    const data = await api.getSelectionDetail(listId);
+    renderDetailView(data);
+  } catch (e) {
+    document.getElementById('detail-content').innerHTML =
+      `<div class="empty"><h3>加载失败</h3><p>${e.message}</p></div>`;
+  }
+}
+
+function renderDetailView(data) {
+  const stocks = data.stocks || [];
+  const matched = stocks.filter(s => s.any_hit);
+  const unmatched = stocks.filter(s => !s.any_hit);
+
+  document.getElementById('detail-content').innerHTML = `
+    <h1 class="page-title">${data.list_name || '选股列表'}</h1>
+    <div style="display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap">
+      <span class="badge badge-ok">✅ 命中 ${matched.length} 只</span>
+      <span class="badge badge-draft">总计 ${stocks.length} 只</span>
+      <span style="font-size:12px;color:var(--sub);align-self:center">
+        📅 ${formatDateDisplay(data.date)} · ${data.filename || ''}
+      </span>
+    </div>
+
+    ${matched.length > 0 ? `
+      <div class="section-title" style="margin-bottom:12px">🎯 命中策略的股票</div>
+      <div class="table-wrapper" style="margin-bottom:24px">
+        <table>
+          <thead><tr><th>代码</th><th>名称</th><th>策略</th><th>概念</th></tr></thead>
+          <tbody>
+            ${matched.map(s => {
+              const concepts = (s.concepts_arr || []).slice(0, 2).join(' / ');
+              return `
+                <tr class="tr-hit">
+                  <td class="stock-code">${s.code}</td>
+                  <td class="stock-name" onclick="goToStock('${s.code}')">${s.name}</td>
+                  <td>${strategyTags(s)}</td>
+                  <td style="font-size:12px;color:var(--sub)">${concepts || '-'}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>` : '<div class="hl-box">本次选股列表中没有股票命中策略</div>'}
+
+    ${unmatched.length > 0 ? `
+      <div class="section-title" style="margin-bottom:12px;color:var(--sub)">未命中的股票（${unmatched.length} 只）</div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>代码</th><th>名称</th></tr></thead>
+          <tbody>
+            ${unmatched.slice(0, 50).map(s => `
+              <tr>
+                <td class="stock-code">${s.code}</td>
+                <td class="stock-name" onclick="goToStock('${s.code}')">${s.name}</td>
+              </tr>`).join('')}
+            ${unmatched.length > 50 ? `<tr><td colspan="2" style="color:var(--sub);text-align:center">还有 ${unmatched.length-50} 只...</td></tr>` : ''}
+          </tbody>
+        </table>
+      </div>` : ''}`;
+}
+
+function showListView() {
+  document.getElementById('list-view').style.display = 'block';
+  document.getElementById('detail-view').style.display = 'none';
+}
+
+// 初始化
+loadLists();
+</script>
+</body>
+</html>

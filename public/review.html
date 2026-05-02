@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>每日复盘 — StrategyReview</title>
+<link rel="stylesheet" href="/assets/css/main.css">
+<style>
+/* 复盘详情页样式 */
+.review-detail { display: none; }
+.review-list-view { display: block; }
+
+/* 指数卡片 */
+.indices-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.idx-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.idx-card.highlight { border-color: rgba(255,215,0,0.3); }
+.idx-name { font-size: 11px; color: var(--sub); margin-bottom: 6px; }
+.idx-pct { font-size: 24px; font-weight: 800; }
+.idx-detail { font-size: 11px; color: var(--sub); margin-top: 4px; }
+
+/* 情绪统计 */
+.emotion-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.emo-card { text-align: center; background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.emo-label { font-size: 11px; color: var(--sub); margin-bottom: 6px; }
+.emo-val { font-size: 22px; font-weight: 800; }
+
+/* 高阶指标 */
+.advanced-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+.adv-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.adv-label { font-size: 11px; color: var(--sub); margin-bottom: 4px; }
+.adv-val { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.adv-chart { margin-top: 6px; }
+canvas.mini-chart { width: 100%; height: 40px; opacity: 0.8; }
+
+/* 板块 */
+.sector-tab { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+.stab {
+  padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--border); cursor: pointer; transition: all 0.2s;
+  color: var(--sub);
+}
+.stab.active { border-color: var(--gold); color: var(--gold); background: rgba(255,215,0,0.1); }
+
+/* 复盘列表 */
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+.rv-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.25s;
+}
+.rv-card:hover { border-color: rgba(255,215,0,0.4); transform: translateY(-2px); }
+.rv-date { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+.rv-summary { font-size: 12px; color: var(--sub); margin-bottom: 10px; }
+.rv-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.rv-pill { font-size: 11px; padding: 2px 8px; border-radius: 20px; background: var(--bg3); }
+
+/* 返回按钮 */
+.back-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--sub); font-size: 13px; cursor: pointer; margin-bottom: 20px;
+  transition: color 0.2s;
+}
+.back-btn:hover { color: var(--gold); }
+</style>
+</head>
+<body>
+<div id="nav-container"></div>
+
+<div class="container">
+  <!-- 列表视图 -->
+  <div class="review-list-view" id="list-view">
+    <h1 class="page-title">每日复盘</h1>
+    <p class="page-sub" id="list-sub">历史市场分析存档，数据共享，策略标注自动同步</p>
+
+    <div class="review-grid" id="review-grid">
+      <div class="loading"><div class="spinner"></div>加载中...</div>
+    </div>
+    <div id="list-pagination"></div>
+  </div>
+
+  <!-- 详情视图 -->
+  <div class="review-detail" id="detail-view">
+    <div class="back-btn" onclick="showList()">← 返回复盘列表</div>
+
+    <div id="detail-header"></div>
+
+    <!-- Section 1: 大盘综述 -->
+    <div class="section-title" style="margin-top:24px">📈 大盘综述</div>
+    <div class="indices-grid" id="indices-grid">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+
+    <div class="advanced-grid" id="advanced-grid"></div>
+
+    <div class="emotion-grid" id="emotion-grid"></div>
+
+    <!-- Section 2: 热点板块 -->
+    <div class="section-title" style="margin-top:28px">🔥 热点板块分析</div>
+    <div class="sector-tab" id="sector-tabs"></div>
+    <div id="board-content">
+      <div class="loading"><div class="spinner"></div>加载板块数据...</div>
+    </div>
+
+    <!-- Section 3: 市场分析 -->
+    <div id="analysis-section" style="display:none">
+      <div class="section-title" style="margin-top:28px">📝 市场分析</div>
+      <div class="card" id="analysis-text"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/components.js"></script>
+<script>
+document.getElementById('nav-container').innerHTML = renderNav('review');
+initNavStatus();
+
+let currentPage = 1;
+const PAGE_SIZE = 18;
+
+// ===== 列表视图 =====
+async function loadList(page = 1) {
+  currentPage = page;
+  const grid = document.getElementById('review-grid');
+  grid.innerHTML = loadingHtml();
+
+  try {
+    const data = await api.getReviewList(page, PAGE_SIZE);
+    if (!data.items?.length) {
+      grid.innerHTML = emptyHtml('暂无复盘数据', '每日 18:00 自动更新');
+      return;
+    }
+
+    grid.innerHTML = data.items.map(r => {
+      const indices = r.indices_parsed || [];
+      const statusMap = {
+        published: 'badge-ok',
+        partial: 'badge-partial',
+        draft: 'badge-draft',
+        failed: 'badge-failed',
+      };
+      return `
+        <div class="rv-card" onclick="showDetail('${r.date}')">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div class="rv-date">${formatDateDisplay(r.date)}</div>
+            <span class="badge ${statusMap[r.status] || 'badge-draft'}">${statusLabel(r.status)}</span>
+          </div>
+          <div class="rv-summary">${r.summary || '点击查看详情'}</div>
+          <div class="rv-pills">
+            <span class="rv-pill">${r.title || r.date}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    document.getElementById('list-sub').textContent =
+      `共 ${data.total} 条历史复盘，最新：${data.items[0] ? formatDateDisplay(data.items[0].date) : '-'}`;
+
+    document.getElementById('list-pagination').innerHTML =
+      renderPagination(data.total, page, PAGE_SIZE, 'loadList');
+
+  } catch (e) {
+    grid.innerHTML = `<div class="empty"><h3>加载失败</h3><p>${e.message}</p></div>`;
+  }
+}
+
+function statusLabel(s) {
+  return {published:'已更新',partial:'部分',draft:'未更新',failed:'失败'}[s] || s;
+}
+
+// ===== 详情视图 =====
+async function showDetail(date) {
+  document.getElementById('list-view').style.display = 'none';
+  document.getElementById('detail-view').style.display = 'block';
+  window.scrollTo(0, 0);
+
+  document.getElementById('detail-header').innerHTML =
+    `<h1 class="page-title">${formatDateDisplay(date)} 市场复盘</h1><div class="loading"><div class="spinner"></div>加载数据中...</div>`;
+  document.getElementById('indices-grid').innerHTML = loadingHtml();
+
+  try {
+    const data = await api.getReview(date);
+
+    if (data.status === 'not_found' || data.status === 'failed') {
+      document.getElementById('detail-header').innerHTML = `
+        <h1 class="page-title">${formatDateDisplay(date)} 市场复盘</h1>
+        <div class="hl-box warning">
+          ❌ ${data.message || '数据获取失败'}
+        </div>`;
+      document.getElementById('indices-grid').innerHTML = '';
+      return;
+    }
+
+    // 标题 + 状态
+    const statusInfo = {
+      published: ['✅ 数据更新完成',   'success'],
+      partial:   ['⚠️ 部分数据更新', 'warning'],
+      draft:     ['⏳ 数据还未更新',   ''],
+      failed:    ['❌ 数据获取失败',   'warning'],
+    };
+    const [smsg, scls] = statusInfo[data.status] || statusInfo.draft;
+
+    document.getElementById('detail-header').innerHTML = `
+      <h1 class="page-title">${data.title || formatDateDisplay(date) + ' 市场复盘'}</h1>
+      <div class="hl-box ${scls}" style="margin-bottom:16px">${smsg}</div>`;
+
+    // 指数
+    renderIndices(data.indices);
+
+    // 情绪
+    renderEmotion(data.emotion, data.limits);
+
+    // 板块
+    renderBoards(data.board, data.sectors);
+
+    // 分析文字
+    if (data.analysis_text) {
+      document.getElementById('analysis-section').style.display = 'block';
+      document.getElementById('analysis-text').innerHTML =
+        data.analysis_text.replace(/\n/g, '<br>');
+    }
+
+  } catch (e) {
+    document.getElementById('indices-grid').innerHTML =
+      `<div class="empty"><h3>加载失败</h3><p>${e.message}</p></div>`;
+  }
+}
+
+function showList() {
+  document.getElementById('list-view').style.display = 'block';
+  document.getElementById('detail-view').style.display = 'none';
+  history.pushState(null, '', '/review.html');
+}
+
+// ===== 渲染指数 =====
+function renderIndices(indices) {
+  if (!indices || !indices.length) {
+    document.getElementById('indices-grid').innerHTML =
+      emptyHtml('暂无指数数据');
+    return;
+  }
+
+  const targets = [
+    { ts: '000001.SH', label: '上证指数', highlight: false },
+    { ts: '399001.SZ', label: '深证成指', highlight: false },
+    { ts: '399006.SZ', label: '创业板指', highlight: true },
+    { ts: '000688.SH', label: '科创50',   highlight: false },
+  ];
+
+  const idxMap = {};
+  for (const idx of indices) idxMap[idx.ts_code] = idx;
+
+  document.getElementById('indices-grid').innerHTML = targets.map(t => {
+    const d = idxMap[t.ts] || {};
+    const pct = parseFloat(d.pct_chg || 0);
+    const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+    const sign = pct > 0 ? '+' : '';
+    const amt = d.amount ? fmtAmount(d.amount / 1e4) : '-';
+    return `
+      <div class="idx-card ${t.highlight ? 'highlight' : ''}">
+        <div class="idx-name">${t.label}</div>
+        <div class="idx-pct ${cls}">${sign}${pct.toFixed(2)}%</div>
+        <div class="idx-detail">收盘 ${d.close ? parseFloat(d.close).toFixed(2) : '-'}</div>
+        <div class="idx-detail">成交额 ${amt}</div>
+      </div>`;
+  }).join('');
+}
+
+// ===== 渲染情绪 =====
+function renderEmotion(emotion, limits) {
+  const up = limits?.up?.length ?? (emotion?.up_limit_count || '-');
+  const down = limits?.down?.length ?? (emotion?.down_limit_count || '-');
+  const ratio = emotion?.up_ratio ? (parseFloat(emotion.up_ratio) * 100).toFixed(1) + '%' : '-';
+  const total = emotion?.total_amount ? fmtAmount(parseFloat(emotion.total_amount) / 1e4) : '-';
+
+  document.getElementById('emotion-grid').innerHTML = `
+    <div class="emo-card">
+      <div class="emo-label">上涨比例</div>
+      <div class="emo-val up">${ratio}</div>
+    </div>
+    <div class="emo-card">
+      <div class="emo-label">涨停家数</div>
+      <div class="emo-val up">${up}</div>
+    </div>
+    <div class="emo-card">
+      <div class="emo-label">跌停家数</div>
+      <div class="emo-val down">${down}</div>
+    </div>
+    <div class="emo-card">
+      <div class="emo-label">市场成交额</div>
+      <div class="emo-val" style="color:var(--gold)">${total}</div>
+    </div>`;
+}
+
+// ===== 渲染板块 =====
+function renderBoards(boardData, sectors) {
+  const data = boardData || (sectors ? sectors.map(s => ({ name: s.name || s.ts_name, changePct: s.pct_chg || 0, stocks: [] })) : null);
+
+  if (!data || !data.length) {
+    document.getElementById('board-content').innerHTML = emptyHtml('暂无板块数据');
+    document.getElementById('sector-tabs').innerHTML = '';
+    return;
+  }
+
+  // 渲染 tab
+  document.getElementById('sector-tabs').innerHTML = data.map((b, i) => `
+    <div class="stab ${i === 0 ? 'active' : ''}" onclick="switchBoard(${i}, this)">
+      ${b.name}
+      <span class="${parseFloat(b.changePct) >= 0 ? 'up' : 'down'}">
+        ${parseFloat(b.changePct) >= 0 ? '+' : ''}${parseFloat(b.changePct || 0).toFixed(2)}%
+      </span>
+    </div>`).join('');
+
+  window._boardData = data;
+  renderBoardStocks(0);
+}
+
+function switchBoard(idx, el) {
+  document.querySelectorAll('.stab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderBoardStocks(idx);
+}
+
+function renderBoardStocks(idx) {
+  const board = window._boardData?.[idx];
+  if (!board) return;
+
+  const stocks = board.stocks || [];
+  const content = document.getElementById('board-content');
+
+  if (!stocks.length) {
+    content.innerHTML = emptyHtml('暂无成分股数据');
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="card">
+      <div style="font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between">
+        <span>${board.name}</span>
+        <span>命中策略：${stocks.filter(s=>s.s1||s.s2||s.s3||s.all_3).length} / ${stocks.length}</span>
+      </div>
+      <table>
+        <thead><tr>
+          <th>代码</th><th>名称</th><th>涨幅</th><th>策略</th>
+        </tr></thead>
+        <tbody>
+          ${stocks.map(s => `
+            <tr class="${(s.s1||s.s2||s.s3||s.all_3) ? 'tr-hit' : ''}">
+              <td class="stock-code">${s.code}</td>
+              <td class="stock-name" onclick="goToStock('${s.code}')">${s.name}</td>
+              <td>${fmtPct(s.pct)}</td>
+              <td>${strategyTags(s)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ===== 初始化 =====
+const urlParams = new URLSearchParams(location.search);
+const dateParam = urlParams.get('date');
+
+if (dateParam) {
+  showDetail(dateParam);
+} else {
+  loadList(1);
+}
+</script>
+</body>
+</html>
