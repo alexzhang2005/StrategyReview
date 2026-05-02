@@ -528,12 +528,28 @@ function renderCell(key, s) {
       return '<td>' + (s.quality_count > 0 ? '<span class="td-pos">' + s.quality_count + '/3</span>' : '<span class="td-nil">0</span>') + '</td>';
     case '_s_tags': {
       var t = [];
-      if (s.s1) t.push('<span class="pill pill-blue">S1</span>');
-      if (s.s1_sub) t.push('<span class="pill pill-blue">S1*</span>');
-      if (s.s2) t.push('<span class="pill pill-green">S2</span>');
-      if (s.s3) t.push('<span class="pill pill-red">S3</span>');
-      if (s.s4) t.push('<span class="pill pill-purple">S4</span>');
-      if (s.s4_sub) t.push('<span class="pill pill-purple">S4*</span>');
+      if (multiMode) {
+        // 多策略叠选：显示所有命中的策略标签
+        if (s.s1) t.push('<span class="pill pill-blue">S1</span>');
+        if (s.s2) t.push('<span class="pill pill-green">S2</span>');
+        if (s.s3) t.push('<span class="pill pill-red">S3</span>');
+        if (s.s4) t.push('<span class="pill pill-purple">S4</span>');
+        if (s.s1 && s.s1_sub) t.push('<span class="pill pill-blue" style="opacity:0.75">S1*</span>');
+        if (s.s4 && s.s4_sub) t.push('<span class="pill pill-purple" style="opacity:0.75">S4*</span>');
+      } else {
+        // 单策略页面：只显示当前策略的标签，避免跨策略混淆
+        if (currentCard === 's1') {
+          t.push('<span class="pill pill-blue">S1</span>');
+          if (s.s1_sub) t.push('<span class="pill pill-blue" style="opacity:0.75">S1*</span>');
+        } else if (currentCard === 's2') {
+          t.push('<span class="pill pill-green">S2</span>');
+        } else if (currentCard === 's3') {
+          t.push('<span class="pill pill-red">S3</span>');
+        } else if (currentCard === 's4') {
+          t.push('<span class="pill pill-purple">S4</span>');
+          if (s.s4_sub) t.push('<span class="pill pill-purple" style="opacity:0.75">S4*</span>');
+        }
+      }
       return '<td>' + (t.join('') || '<span class="td-nil">—</span>') + '</td>';
     }
     default:
@@ -588,6 +604,17 @@ function selectCard(key) {
   sortState = { col: null, order: 'asc' };
   currentPage = 1;
   currentSector = null;
+  // 重置子策略筛选，并按当前策略更新选项
+  currentSubFilter = 'all';
+  var sf = document.getElementById('sub-filter');
+  sf.value = 'all';
+  var subOpts = {
+    's1': '<option value="all">子策略：全部</option><option value="s1_sub">仅 S1 子策略(加速)</option>',
+    's4': '<option value="all">子策略：全部</option><option value="s4_sub">仅 S4 子策略(加速)</option>',
+    's2': '<option value="all">子策略：全部</option>',
+    's3': '<option value="all">子策略：全部</option>'
+  };
+  sf.innerHTML = subOpts[key] || '<option value="all">子策略：全部</option>';
   loadStocks();
 }
 
@@ -604,6 +631,11 @@ function onMultiFilter() {
     multiMode = true;
     multiSelected = checked;
     document.querySelectorAll('.s-card').forEach(function(c) { c.classList.remove('active'); });
+    // 多选模式下恢复全部子策略选项
+    var sf = document.getElementById('sub-filter');
+    sf.innerHTML = '<option value="all">子策略：全部</option><option value="s1_sub">仅 S1 子策略(加速)</option><option value="s4_sub">仅 S4 子策略(加速)</option>';
+    sf.value = 'all';
+    currentSubFilter = 'all';
   }
   sortState = { col: null, order: 'asc' };
   currentPage = 1;
