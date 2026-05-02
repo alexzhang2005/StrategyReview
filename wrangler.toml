@@ -5,7 +5,7 @@ pages_build_output_dir = "public"
 [[d1_databases]]
 binding = "DB"
 database_name = "strategy-review-db"
-database_id = "PLACEHOLDER_DB_ID"
+database_id = "574a10cf-8c7b-4ba8-afec-286e77bfe23d"
 
 [vars]
 JIUKUAN_API_KEY = "jk_HTcOTj-AsuUTo13mK3wimYAAqwo98hjUSW54WtORBvI"
