@@ -212,6 +212,11 @@ table.main-tbl tr:hover td { background: rgba(255,255,255,0.02); }
   <div class="tool-bar">
     <input class="search-input" style="width:200px" id="search-input"
       placeholder="搜索代码/名称/行业..." oninput="onSearch()">
+    <select class="search-input" style="width:180px" id="sub-filter" onchange="onSubFilter()">
+      <option value="all">子策略：全部</option>
+      <option value="s1_sub">仅 S1 子策略</option>
+      <option value="s4_sub">仅 S4 子策略</option>
+    </select>
     <span class="sort-label" id="total-label"></span>
     <div style="margin-left:auto;display:flex;gap:8px">
       <button class="btn btn-outline btn-sm" onclick="exportCsv()">📥 导出CSV</button>
@@ -259,13 +264,23 @@ let searchTimer;
 let allStocks = [];
 let filteredStocks = [];
 let currentSector = null;
+let currentSubFilter = 'all';
 
 // ── 格式化工具 ──
-const W = 10000;
-
-function fmtWan(v) {
+function fmtValue(v, decimals) {
+  decimals = decimals == null ? 2 : decimals;
   if (v == null) return '<span class="td-nil">—</span>';
-  return '<span class="td-num">' + (v/W).toFixed(0) + '</span>';
+  var n = Number(v);
+  if (!Number.isFinite(n)) return '<span class="td-nil">—</span>';
+  if (Math.abs(n - Math.round(n)) < 1e-9) {
+    return '<span class="td-num">' + Math.round(n).toLocaleString('zh-CN') + '</span>';
+  }
+  return '<span class="td-num">' + n.toLocaleString('zh-CN', { maximumFractionDigits: decimals }) + '</span>';
+}
+function fmtValueWithUnit(v, unit, decimals) {
+  var valueHtml = fmtValue(v, decimals);
+  if (v == null) return valueHtml;
+  return valueHtml.replace('</span>', (unit || '') + '</span>');
 }
 function fmtPct(v) {
   if (v == null) return '<span class="td-nil">—</span>';
@@ -279,14 +294,14 @@ function fmtNum(v, decimals) {
   return '<span class="td-num">' + Number(v).toFixed(decimals) + '</span>';
 }
 // 绝对值(万) + 增速(小字下行)
-function fmtWithGrowth(val, growth) {
+function fmtWithGrowth(val, growth, unit) {
   if (val == null) return '<span class="td-nil">—</span>';
-  var w = (val / W).toFixed(0);
-  if (growth == null) return '<span class="td-num">' + w + '万</span>';
+  var main = fmtValueWithUnit(val, unit || '', 2);
+  if (growth == null) return main;
   var pct = (growth * 100).toFixed(1);
   var sign = growth >= 0 ? '+' : '';
   var gcls = growth > 0 ? 'td-pos' : growth < 0 ? 'td-neg' : 'td-nil';
-  return '<span class="td-num">' + w + '万</span><br><span class="' + gcls + '" style="font-size:11px">' + sign + pct + '%</span>';
+  return main + '<br><span class="' + gcls + '" style="font-size:11px">' + sign + pct + '%</span>';
 }
 // 百分比值 + 变化量(小字下行)
 function fmtPctWithGrowth(val, growth) {
@@ -316,7 +331,7 @@ const COL_DEFS = {
     { key: 'industry',label: '行业',     align: 'left', sortable: false },
     { key: '_s_tags', label: '命中',     sortable: false },
     { key: '_trail1', label: '增长期数', sortable: false },
-    { key: '_26q1_g', label: '26Q1增速', sortable: true, sortKey: 'top10_26q1' },
+    { key: '_26q1_g', label: '26Q1',     sortable: true, sortKey: 'top10_26q1' },
     { key: '_25q4_g', label: '25Q4',     sortable: true, sortKey: 'top10_25q4' },
     { key: '_25q3_g', label: '25Q3',     sortable: true, sortKey: 'top10_25q3' },
     { key: '_25q2_g', label: '25Q2',     sortable: true, sortKey: 'top10_25q2' },
@@ -326,15 +341,15 @@ const COL_DEFS = {
     { key: 'name',    label: '名称',     align: 'left', sortable: false },
     { key: 'industry',label: '行业',     align: 'left', sortable: false },
     { key: '_s_tags', label: '命中',     sortable: false },
-    { key: '_roe25_g',   label: 'ROE25增速',  sortable: true, sortKey: 'roe_25' },
+    { key: '_roe25_g',   label: 'ROE25(%)',   sortable: true, sortKey: 'roe_25' },
     { key: '_roe24_g',   label: 'ROE24',       sortable: true, sortKey: 'roe_24' },
     { key: '_roe23_g',   label: 'ROE23',       sortable: true, sortKey: 'roe_23' },
     { key: 'roe_22',     label: 'ROE22',       sortable: true },
-    { key: '_ml25_g',    label: '毛利25增速',  sortable: true, sortKey: 'margin_25' },
+    { key: '_ml25_g',    label: '毛利25(%)',   sortable: true, sortKey: 'margin_25' },
     { key: '_ml24_g',    label: '毛利24',      sortable: true, sortKey: 'margin_24' },
     { key: '_ml23_g',    label: '毛利23',      sortable: true, sortKey: 'margin_23' },
     { key: 'margin_22',  label: '毛利22',      sortable: true },
-    { key: '_np25_g',    label: '净利25增速',  sortable: true, sortKey: 'net_profit_25' },
+    { key: '_np25_g',    label: '净利25(元)',  sortable: true, sortKey: 'net_profit_25' },
     { key: '_np24_g',    label: '净利24',      sortable: true, sortKey: 'net_profit_24' },
     { key: '_np23_g',    label: '净利23',      sortable: true, sortKey: 'net_profit_23' },
     { key: 'net_profit_22', label: '净利22',   sortable: true },
@@ -344,11 +359,11 @@ const COL_DEFS = {
     { key: 'name',    label: '名称',     align: 'left', sortable: false },
     { key: 'industry',label: '行业',     align: 'left', sortable: false },
     { key: '_s_tags', label: '命中',     sortable: false },
-    { key: '_rev25_g',   label: '营收25增速',  sortable: true, sortKey: 'revenue_25' },
+    { key: '_rev25_g',   label: '营收25(元)',  sortable: true, sortKey: 'revenue_25' },
     { key: '_rev24_g',   label: '营收24',      sortable: true, sortKey: 'revenue_24' },
     { key: '_rev23_g',   label: '营收23',      sortable: true, sortKey: 'revenue_23' },
     { key: 'revenue_22', label: '营收22',      sortable: true },
-    { key: '_kp25_g',    label: '扣非25增速',  sortable: true, sortKey: 'k_profit_25' },
+    { key: '_kp25_g',    label: '扣非25(元)',  sortable: true, sortKey: 'k_profit_25' },
     { key: '_kp24_g',    label: '扣非24',      sortable: true, sortKey: 'k_profit_24' },
     { key: '_kp23_g',    label: '扣非23',      sortable: true, sortKey: 'k_profit_23' },
     { key: 'k_profit_22',label: '扣非22',      sortable: true },
@@ -359,7 +374,7 @@ const COL_DEFS = {
     { key: 'industry',label: '行业',     align: 'left', sortable: false },
     { key: '_s_tags', label: '命中',     sortable: false },
     { key: '_trail4',      label: '增长期数',    sortable: false },
-    { key: '_inst26q1_g',  label: '机构26Q1增速',sortable: true, sortKey: 'inst_26q1' },
+    { key: '_inst26q1_g',  label: '机构26Q1',    sortable: true, sortKey: 'inst_26q1' },
     { key: '_inst25q4_g',  label: '机构25Q4',    sortable: true, sortKey: 'inst_25q4' },
     { key: '_inst25q3_g',  label: '机构25Q3',    sortable: true, sortKey: 'inst_25q3' },
     { key: '_inst25q2_g',  label: '机构25Q2',    sortable: true, sortKey: 'inst_25q2' },
@@ -372,10 +387,10 @@ const MULTI_COLS = [
   { key: 'industry',    label: '行业',       align: 'left', sortable: false },
   { key: '_s_tags',     label: '命中策略',   sortable: false },
   { key: 'quality_count', label: '质量分',   sortable: true },
-  { key: 'top10_26q1',  label: '持股26Q1(万)', sortable: true },
-  { key: 'roe_25',      label: 'ROE25',      sortable: true },
-  { key: 'revenue_25',  label: '营收25(万)', sortable: true },
-  { key: 'inst_26q1',   label: '机构26Q1(万)', sortable: true },
+  { key: 'top10_26q1',  label: '持股26Q1',    sortable: true },
+  { key: 'roe_25',      label: 'ROE25(%)',    sortable: true },
+  { key: 'revenue_25',  label: '营收25(元)',  sortable: true },
+  { key: 'inst_26q1',   label: '机构26Q1',    sortable: true },
 ];
 
 // ── 渲染单元格 ──
@@ -397,18 +412,18 @@ function renderCell(key, s) {
     }
     case '_26q1_g': {
       var g = s.top10_25q4 ? s.delta_26q1 / Math.abs(s.top10_25q4) : null;
-      return '<td>' + fmtWithGrowth(s.top10_26q1, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.top10_26q1, g, '') + '</td>';
     }
     case '_25q4_g': {
       var g = s.top10_25q3 ? s.delta_25q4 / Math.abs(s.top10_25q3) : null;
-      return '<td>' + fmtWithGrowth(s.top10_25q4, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.top10_25q4, g, '') + '</td>';
     }
     case '_25q3_g': {
       var g = s.top10_25q2 ? s.delta_25q3 / Math.abs(s.top10_25q2) : null;
-      return '<td>' + fmtWithGrowth(s.top10_25q3, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.top10_25q3, g, '') + '</td>';
     }
     case '_25q2_g':
-      return '<td>' + fmtWithGrowth(s.top10_25q2, null) + '</td>';
+      return '<td>' + fmtWithGrowth(s.top10_25q2, null, '') + '</td>';
 
     // ── S2 ROE ──
     case '_roe25_g': {
@@ -439,42 +454,42 @@ function renderCell(key, s) {
     // ── S2 净利润 ──
     case '_np25_g': {
       var g = s.net_profit_24 ? (s.net_profit_25 - s.net_profit_24) / Math.abs(s.net_profit_24) : null;
-      return '<td>' + fmtWithGrowth(s.net_profit_25, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.net_profit_25, g, '元') + '</td>';
     }
     case '_np24_g': {
       var g = s.net_profit_23 ? (s.net_profit_24 - s.net_profit_23) / Math.abs(s.net_profit_23) : null;
-      return '<td>' + fmtWithGrowth(s.net_profit_24, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.net_profit_24, g, '元') + '</td>';
     }
     case '_np23_g': {
       var g = s.net_profit_22 ? (s.net_profit_23 - s.net_profit_22) / Math.abs(s.net_profit_22) : null;
-      return '<td>' + fmtWithGrowth(s.net_profit_23, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.net_profit_23, g, '元') + '</td>';
     }
 
     // ── S3 营收 ──
     case '_rev25_g': {
       var g = s.revenue_24 ? (s.revenue_25 - s.revenue_24) / Math.abs(s.revenue_24) : null;
-      return '<td>' + fmtWithGrowth(s.revenue_25, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.revenue_25, g, '元') + '</td>';
     }
     case '_rev24_g': {
       var g = s.revenue_23 ? (s.revenue_24 - s.revenue_23) / Math.abs(s.revenue_23) : null;
-      return '<td>' + fmtWithGrowth(s.revenue_24, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.revenue_24, g, '元') + '</td>';
     }
     case '_rev23_g': {
       var g = s.revenue_22 ? (s.revenue_23 - s.revenue_22) / Math.abs(s.revenue_22) : null;
-      return '<td>' + fmtWithGrowth(s.revenue_23, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.revenue_23, g, '元') + '</td>';
     }
     // ── S3 扣非净利 ──
     case '_kp25_g': {
       var g = s.k_profit_24 ? (s.k_profit_25 - s.k_profit_24) / Math.abs(s.k_profit_24) : null;
-      return '<td>' + fmtWithGrowth(s.k_profit_25, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.k_profit_25, g, '元') + '</td>';
     }
     case '_kp24_g': {
       var g = s.k_profit_23 ? (s.k_profit_24 - s.k_profit_23) / Math.abs(s.k_profit_23) : null;
-      return '<td>' + fmtWithGrowth(s.k_profit_24, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.k_profit_24, g, '元') + '</td>';
     }
     case '_kp23_g': {
       var g = s.k_profit_22 ? (s.k_profit_23 - s.k_profit_22) / Math.abs(s.k_profit_22) : null;
-      return '<td>' + fmtWithGrowth(s.k_profit_23, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.k_profit_23, g, '元') + '</td>';
     }
 
     // ── S4 机构持股 ──
@@ -486,37 +501,39 @@ function renderCell(key, s) {
     }
     case '_inst26q1_g': {
       var g = s.inst_25q4 ? s.inst_d1 / Math.abs(s.inst_25q4) : null;
-      return '<td>' + fmtWithGrowth(s.inst_26q1, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.inst_26q1, g, '') + '</td>';
     }
     case '_inst25q4_g': {
       var g = s.inst_25q3 ? s.inst_d2 / Math.abs(s.inst_25q3) : null;
-      return '<td>' + fmtWithGrowth(s.inst_25q4, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.inst_25q4, g, '') + '</td>';
     }
     case '_inst25q3_g': {
       var g = s.inst_25q2 ? s.inst_d3 / Math.abs(s.inst_25q2) : null;
-      return '<td>' + fmtWithGrowth(s.inst_25q3, g) + '</td>';
+      return '<td>' + fmtWithGrowth(s.inst_25q3, g, '') + '</td>';
     }
     case '_inst25q2_g':
-      return '<td>' + fmtWithGrowth(s.inst_25q2, null) + '</td>';
+      return '<td>' + fmtWithGrowth(s.inst_25q2, null, '') + '</td>';
 
     // ── 通用字段 ──
     case 'roe_22':        return '<td>' + fmtNum(s.roe_22, 2) + '</td>';
     case 'margin_22':     return '<td>' + fmtNum(s.margin_22, 2) + '</td>';
-    case 'net_profit_22': return '<td>' + fmtWan(s.net_profit_22) + '</td>';
-    case 'revenue_22':    return '<td>' + fmtWan(s.revenue_22) + '</td>';
-    case 'k_profit_22':   return '<td>' + fmtWan(s.k_profit_22) + '</td>';
-    case 'top10_26q1':    return '<td>' + fmtWan(s.top10_26q1) + '</td>';
-    case 'roe_25':        return '<td>' + fmtNum(s.roe_25, 2) + '</td>';
-    case 'revenue_25':    return '<td>' + fmtWan(s.revenue_25) + '</td>';
-    case 'inst_26q1':     return '<td>' + fmtWan(s.inst_26q1) + '</td>';
+    case 'net_profit_22': return '<td>' + fmtValueWithUnit(s.net_profit_22, '元', 2) + '</td>';
+    case 'revenue_22':    return '<td>' + fmtValueWithUnit(s.revenue_22, '元', 2) + '</td>';
+    case 'k_profit_22':   return '<td>' + fmtValueWithUnit(s.k_profit_22, '元', 2) + '</td>';
+    case 'top10_26q1':    return '<td>' + fmtValueWithUnit(s.top10_26q1, '', 2) + '</td>';
+    case 'roe_25':        return '<td>' + fmtValueWithUnit(s.roe_25, '%', 2) + '</td>';
+    case 'revenue_25':    return '<td>' + fmtValueWithUnit(s.revenue_25, '元', 2) + '</td>';
+    case 'inst_26q1':     return '<td>' + fmtValueWithUnit(s.inst_26q1, '', 2) + '</td>';
     case 'quality_count':
       return '<td>' + (s.quality_count > 0 ? '<span class="td-pos">' + s.quality_count + '/3</span>' : '<span class="td-nil">0</span>') + '</td>';
     case '_s_tags': {
       var t = [];
       if (s.s1) t.push('<span class="pill pill-blue">S1</span>');
+      if (s.s1_sub) t.push('<span class="pill pill-blue">S1*</span>');
       if (s.s2) t.push('<span class="pill pill-green">S2</span>');
       if (s.s3) t.push('<span class="pill pill-red">S3</span>');
       if (s.s4) t.push('<span class="pill pill-purple">S4</span>');
+      if (s.s4_sub) t.push('<span class="pill pill-purple">S4*</span>');
       return '<td>' + (t.join('') || '<span class="td-nil">—</span>') + '</td>';
     }
     default:
@@ -642,12 +659,18 @@ async function loadStocks(page) {
 // ── 搜索 ──
 function applySearch() {
   const q = document.getElementById('search-input').value.trim().toLowerCase();
+  currentSubFilter = document.getElementById('sub-filter').value;
   filteredStocks = q
     ? allStocks.filter(function(s) {
         return s.code.includes(q) || (s.name||'').toLowerCase().includes(q) ||
                (s.industry||'').toLowerCase().includes(q);
       })
     : allStocks;
+  if (currentSubFilter === 's1_sub') {
+    filteredStocks = filteredStocks.filter(function(s) { return Number(s.s1_sub) === 1; });
+  } else if (currentSubFilter === 's4_sub') {
+    filteredStocks = filteredStocks.filter(function(s) { return Number(s.s4_sub) === 1; });
+  }
   if (currentSector) {
     filteredStocks = filteredStocks.filter(function(s) { return (s.industry||'').startsWith(currentSector); });
   }
@@ -656,6 +679,10 @@ function applySearch() {
 function onSearch() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(applySearch, 200);
+}
+function onSubFilter() {
+  currentPage = 1;
+  applySearch();
 }
 
 // ── 渲染表格行 ──
