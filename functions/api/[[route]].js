@@ -23,6 +23,65 @@ function err(msg, status = 400) {
   return json({ error: msg }, status);
 }
 
+// ==================== 策略规则表达式（实时计算）====================
+const EXPR = {
+  s1: `(delta_26q1 > 100 AND delta_25q4 > 100 AND delta_25q3 > 0)`,
+  s1_sub: `(delta_26q1 > 0 AND delta_25q4 > 0 AND delta_25q3 > 0 AND (delta_26q1 * delta_25q3) > (delta_25q4 * delta_25q4))`,
+  roe_up: `(roe_25 > roe_24 AND roe_24 > roe_23 AND roe_23 > 0)`,
+  m_up: `(margin_25 > margin_24 AND margin_24 > margin_23 AND margin_23 > 0)`,
+  k_up: `(net_profit_25 > net_profit_24 AND net_profit_24 > net_profit_23 AND net_profit_23 > 0)`,
+  k_acc: `(
+    (k_profit_24 IS NOT NULL AND k_profit_24 != 0) AND
+    (k_profit_23 IS NOT NULL AND k_profit_23 != 0) AND
+    (k_profit_22 IS NOT NULL AND k_profit_22 != 0) AND
+    ((k_profit_25 - k_profit_24) / ABS(k_profit_24)) > ((k_profit_24 - k_profit_23) / ABS(k_profit_23)) AND
+    ((k_profit_24 - k_profit_23) / ABS(k_profit_23)) > ((k_profit_23 - k_profit_22) / ABS(k_profit_22)) AND
+    ((k_profit_23 - k_profit_22) / ABS(k_profit_22)) > 0
+  )`,
+  y_acc: `(
+    (revenue_24 IS NOT NULL AND revenue_24 != 0) AND
+    (revenue_23 IS NOT NULL AND revenue_23 != 0) AND
+    (revenue_22 IS NOT NULL AND revenue_22 != 0) AND
+    ((revenue_25 - revenue_24) / ABS(revenue_24)) > ((revenue_24 - revenue_23) / ABS(revenue_23)) AND
+    ((revenue_24 - revenue_23) / ABS(revenue_23)) > ((revenue_23 - revenue_22) / ABS(revenue_22)) AND
+    ((revenue_23 - revenue_22) / ABS(revenue_22)) > 0
+  )`,
+  s4_d1: `COALESCE(inst_d1, inst_26q1 - inst_25q4)`,
+  s4_d2: `COALESCE(inst_d2, inst_25q4 - inst_25q3)`,
+  s4_d3: `COALESCE(inst_d3, inst_25q3 - inst_25q2)`,
+};
+
+const EXPR_S2 = `(${EXPR.roe_up} AND ${EXPR.m_up} AND ${EXPR.k_up})`;
+const EXPR_S3 = `(${EXPR.k_acc} AND ${EXPR.y_acc})`;
+const EXPR_S4 = `(${EXPR.s4_d1} > 100 AND ${EXPR.s4_d2} > 100 AND ${EXPR.s4_d3} > 0)`;
+const EXPR_S4_SUB = `(${EXPR.s4_d1} > 0 AND ${EXPR.s4_d2} > 0 AND ${EXPR.s4_d3} > 0 AND (${EXPR.s4_d1} * ${EXPR.s4_d3}) > (${EXPR.s4_d2} * ${EXPR.s4_d2}))`;
+const EXPR_ALL3 = `(${EXPR.s1} AND ${EXPR_S2} AND ${EXPR_S3})`;
+const EXPR_ANY = `(${EXPR.s1} OR ${EXPR_S2} OR ${EXPR_S3} OR ${EXPR_S4})`;
+
+function computedSelectFields() {
+  return `
+    CASE WHEN ${EXPR.s1} THEN 1 ELSE 0 END as s1,
+    CASE WHEN ${EXPR_S2} THEN 1 ELSE 0 END as s2,
+    CASE WHEN ${EXPR_S3} THEN 1 ELSE 0 END as s3,
+    CASE WHEN ${EXPR_S4} THEN 1 ELSE 0 END as s4,
+    CASE WHEN ${EXPR_ALL3} THEN 1 ELSE 0 END as all_3,
+    CASE WHEN ${EXPR_ANY} THEN 1 ELSE 0 END as any_hit,
+    CASE WHEN ${EXPR.s1_sub} THEN 1 ELSE 0 END as s1_sub,
+    CASE WHEN ${EXPR_S4_SUB} THEN 1 ELSE 0 END as s4_sub,
+    CASE WHEN ${EXPR.roe_up} THEN 1 ELSE 0 END as roe_up,
+    CASE WHEN ${EXPR.m_up} THEN 1 ELSE 0 END as m_up,
+    CASE WHEN ${EXPR.k_up} THEN 1 ELSE 0 END as k_up,
+    (CASE WHEN ${EXPR.roe_up} THEN 1 ELSE 0 END +
+     CASE WHEN ${EXPR.m_up} THEN 1 ELSE 0 END +
+     CASE WHEN ${EXPR.k_up} THEN 1 ELSE 0 END) as quality_count,
+    CASE WHEN ${EXPR.k_acc} THEN 1 ELSE 0 END as k_acc,
+    CASE WHEN ${EXPR.y_acc} THEN 1 ELSE 0 END as y_acc,
+    ${EXPR.s4_d1} as inst_d1,
+    ${EXPR.s4_d2} as inst_d2,
+    ${EXPR.s4_d3} as inst_d3
+  `;
+}
+
 // ==================== 主路由 ====================
 export async function onRequest(context) {
   const { request, env, params } = context;
@@ -93,13 +152,14 @@ async function handleStatus(env) {
   ).first();
 
   const stockCount = await env.DB.prepare(
-    "SELECT COUNT(*) as n FROM stocks WHERE any_hit=1"
+    `SELECT COUNT(*) as n FROM stocks WHERE ${EXPR_ANY}`
   ).first();
 
-  const s1 = await env.DB.prepare("SELECT COUNT(*) as n FROM stocks WHERE s1=1").first();
-  const s2 = await env.DB.prepare("SELECT COUNT(*) as n FROM stocks WHERE s2=1").first();
-  const s3 = await env.DB.prepare("SELECT COUNT(*) as n FROM stocks WHERE s3=1").first();
-  const all3 = await env.DB.prepare("SELECT COUNT(*) as n FROM stocks WHERE all_3=1").first();
+  const s1 = await env.DB.prepare(`SELECT COUNT(*) as n FROM stocks WHERE ${EXPR.s1}`).first();
+  const s2 = await env.DB.prepare(`SELECT COUNT(*) as n FROM stocks WHERE ${EXPR_S2}`).first();
+  const s3 = await env.DB.prepare(`SELECT COUNT(*) as n FROM stocks WHERE ${EXPR_S3}`).first();
+  const s4 = await env.DB.prepare(`SELECT COUNT(*) as n FROM stocks WHERE ${EXPR_S4}`).first();
+  const all3 = await env.DB.prepare(`SELECT COUNT(*) as n FROM stocks WHERE ${EXPR_ALL3}`).first();
 
   return json({
     ok: true,
@@ -109,6 +169,7 @@ async function handleStatus(env) {
       s1: s1?.n || 0,
       s2: s2?.n || 0,
       s3: s3?.n || 0,
+      s4: s4?.n || 0,
       all3: all3?.n || 0,
     },
     ts: new Date().toISOString(),
@@ -189,19 +250,19 @@ async function handleCronDailyUpdate(env, request) {
 async function handleStrategySummary(env) {
   const stats = await env.DB.prepare(`
     SELECT 
-      SUM(s1) as s1_count,
-      SUM(s2) as s2_count,
-      SUM(s3) as s3_count,
-      SUM(s4) as s4_count,
-      SUM(all_3) as all3_count,
-      SUM(any_hit) as any_count,
+      SUM(CASE WHEN ${EXPR.s1} THEN 1 ELSE 0 END) as s1_count,
+      SUM(CASE WHEN ${EXPR_S2} THEN 1 ELSE 0 END) as s2_count,
+      SUM(CASE WHEN ${EXPR_S3} THEN 1 ELSE 0 END) as s3_count,
+      SUM(CASE WHEN ${EXPR_S4} THEN 1 ELSE 0 END) as s4_count,
+      SUM(CASE WHEN ${EXPR_ALL3} THEN 1 ELSE 0 END) as all3_count,
+      SUM(CASE WHEN ${EXPR_ANY} THEN 1 ELSE 0 END) as any_count,
       MAX(updated_at) as last_updated,
       MAX(data_version) as data_version
     FROM stocks
   `).first();
 
   const sample_all3 = await env.DB.prepare(
-    "SELECT code, name, industry FROM stocks WHERE all_3=1 LIMIT 5"
+    `SELECT code, name, industry FROM stocks WHERE ${EXPR_ALL3} LIMIT 5`
   ).all();
 
   return json({
@@ -219,12 +280,12 @@ async function handleStrategyStocks(env, strategy, url) {
   const order = url.searchParams.get('order') === 'desc' ? 'DESC' : 'ASC';
 
   const colMap = {
-    s1: 's1=1',
-    s2: 's2=1',
-    s3: 's3=1',
-    s4: 's4=1',
-    all3: 'all_3=1',
-    any: 'any_hit=1',
+    s1: EXPR.s1,
+    s2: EXPR_S2,
+    s3: EXPR_S3,
+    s4: EXPR_S4,
+    all3: EXPR_ALL3,
+    any: EXPR_ANY,
   };
 
   const where = colMap[strategy];
@@ -245,8 +306,9 @@ async function handleStrategyStocks(env, strategy, url) {
   const sortCol = validSorts.has(sort) ? sort : 'code';
 
   const { results } = await env.DB.prepare(
-    `SELECT code, name, industry, s1, s2, s3, s4, all_3, any_hit,
-            quality_count, k_acc, y_acc, s1_sub, s4_sub, concepts, pe, market_cap,
+      `SELECT code, name, industry,
+        ${computedSelectFields()},
+        concepts, pe, market_cap,
             top10_26q1, top10_25q4, top10_25q3, top10_25q2, top10_25q1, top10_24q4,
             delta_26q1, delta_25q4, delta_25q3,
             roe_25, roe_24, roe_23, roe_22,
@@ -282,7 +344,7 @@ async function handleStrategyStocksMulti(env, url) {
   const order = url.searchParams.get('order') === 'desc' ? 'DESC' : 'ASC';
   const strategiesParam = url.searchParams.get('strategies') || 'any';
 
-  const allowedCols = { s1: 's1=1', s2: 's2=1', s3: 's3=1', s4: 's4=1', any: 'any_hit=1', all3: 'all_3=1' };
+  const allowedCols = { s1: EXPR.s1, s2: EXPR_S2, s3: EXPR_S3, s4: EXPR_S4, any: EXPR_ANY, all3: EXPR_ALL3 };
   const parts = strategiesParam.split(',').map(s => s.trim()).filter(s => allowedCols[s]);
   if (!parts.length) return err('Invalid strategies parameter', 400);
 
@@ -303,8 +365,9 @@ async function handleStrategyStocksMulti(env, url) {
   const sortCol = validSorts.has(sort) ? sort : 'code';
 
   const { results } = await env.DB.prepare(
-    `SELECT code, name, industry, s1, s2, s3, s4, all_3, any_hit,
-            quality_count, k_acc, y_acc, s1_sub, s4_sub, concepts, pe, market_cap,
+      `SELECT code, name, industry,
+        ${computedSelectFields()},
+        concepts, pe, market_cap,
             top10_26q1, top10_25q4, top10_25q3, top10_25q2, top10_25q1, top10_24q4,
             delta_26q1, delta_25q4, delta_25q3,
             roe_25, roe_24, roe_23, roe_22,
@@ -339,12 +402,44 @@ async function handleStockDetail(env, code) {
 
   if (!row) return err(`股票 ${code} 不在策略库中`, 404);
 
+  const d1 = row.delta_26q1;
+  const d2 = row.delta_25q4;
+  const d3 = row.delta_25q3;
+  const s1 = d1 > 100 && d2 > 100 && d3 > 0;
+  const s1_sub = d1 > 0 && d2 > 0 && d3 > 0 && (d1 * d3) > (d2 * d2);
+
+  const roe_up = row.roe_25 > row.roe_24 && row.roe_24 > row.roe_23 && row.roe_23 > 0;
+  const m_up = row.margin_25 > row.margin_24 && row.margin_24 > row.margin_23 && row.margin_23 > 0;
+  const k_up = row.net_profit_25 > row.net_profit_24 && row.net_profit_24 > row.net_profit_23 && row.net_profit_23 > 0;
+  const quality_count = (roe_up ? 1 : 0) + (m_up ? 1 : 0) + (k_up ? 1 : 0);
+  const s2 = quality_count === 3;
+
+  const kg25 = (row.k_profit_24 && row.k_profit_24 !== 0) ? (row.k_profit_25 - row.k_profit_24) / Math.abs(row.k_profit_24) : null;
+  const kg24 = (row.k_profit_23 && row.k_profit_23 !== 0) ? (row.k_profit_24 - row.k_profit_23) / Math.abs(row.k_profit_23) : null;
+  const kg23 = (row.k_profit_22 && row.k_profit_22 !== 0) ? (row.k_profit_23 - row.k_profit_22) / Math.abs(row.k_profit_22) : null;
+  const k_acc = kg25 != null && kg24 != null && kg23 != null && kg25 > kg24 && kg24 > kg23 && kg23 > 0;
+
+  const yg25 = (row.revenue_24 && row.revenue_24 !== 0) ? (row.revenue_25 - row.revenue_24) / Math.abs(row.revenue_24) : null;
+  const yg24 = (row.revenue_23 && row.revenue_23 !== 0) ? (row.revenue_24 - row.revenue_23) / Math.abs(row.revenue_23) : null;
+  const yg23 = (row.revenue_22 && row.revenue_22 !== 0) ? (row.revenue_23 - row.revenue_22) / Math.abs(row.revenue_22) : null;
+  const y_acc = yg25 != null && yg24 != null && yg23 != null && yg25 > yg24 && yg24 > yg23 && yg23 > 0;
+  const s3 = k_acc && y_acc;
+
+  const i1 = row.inst_d1 != null ? row.inst_d1 : ((row.inst_26q1 != null && row.inst_25q4 != null) ? (row.inst_26q1 - row.inst_25q4) : null);
+  const i2 = row.inst_d2 != null ? row.inst_d2 : ((row.inst_25q4 != null && row.inst_25q3 != null) ? (row.inst_25q4 - row.inst_25q3) : null);
+  const i3 = row.inst_d3 != null ? row.inst_d3 : ((row.inst_25q3 != null && row.inst_25q2 != null) ? (row.inst_25q3 - row.inst_25q2) : null);
+  const s4 = i1 > 100 && i2 > 100 && i3 > 0;
+  const s4_sub = i1 > 0 && i2 > 0 && i3 > 0 && (i1 * i3) > (i2 * i2);
+
+  const all_3 = s1 && s2 && s3;
+  const any_hit = s1 || s2 || s3 || s4;
+
   const strategies = [];
-  if (row.all_3) strategies.push({ name: '三合一', color: 'gold' });
-  if (row.s1) strategies.push({ name: '持股增长', color: 'blue' });
-  if (row.s2) strategies.push({ name: '盈利质量', color: 'green' });
-  if (row.s3) strategies.push({ name: '全速前进', color: 'red' });
-  if (row.s4) strategies.push({ name: '机构持股', color: 'purple' });
+  if (all_3) strategies.push({ name: '三合一', color: 'gold' });
+  if (s1) strategies.push({ name: '持股增长', color: 'blue' });
+  if (s2) strategies.push({ name: '盈利质量', color: 'green' });
+  if (s3) strategies.push({ name: '全速前进', color: 'red' });
+  if (s4) strategies.push({ name: '机构持股', color: 'purple' });
 
   const parse = (s) => { try { return s ? JSON.parse(s) : []; } catch { return []; } };
 
@@ -353,36 +448,36 @@ async function handleStockDetail(env, code) {
     name: row.name,
     industry: row.industry,
     strategies,
-    s1: !!row.s1, s2: !!row.s2, s3: !!row.s3, s4: !!row.s4,
-    all_3: !!row.all_3, any_hit: !!row.any_hit,
+    s1, s2, s3, s4,
+    all_3, any_hit,
     // S1 详情
     s1_detail: {
       top10_26q1: row.top10_26q1, top10_25q4: row.top10_25q4,
       top10_25q3: row.top10_25q3, top10_25q2: row.top10_25q2,
       top10_25q1: row.top10_25q1, top10_24q4: row.top10_24q4,
       delta_26q1: row.delta_26q1, delta_25q4: row.delta_25q4,
-      delta_25q3: row.delta_25q3, s1_sub: !!row.s1_sub,
+      delta_25q3: row.delta_25q3, s1_sub,
     },
     // S2 详情
     s2_detail: {
       roe: [row.roe_25, row.roe_24, row.roe_23, row.roe_22],
       margin: [row.margin_25, row.margin_24, row.margin_23, row.margin_22],
       net_profit: [row.net_profit_25, row.net_profit_24, row.net_profit_23, row.net_profit_22],
-      roe_up: !!row.roe_up, m_up: !!row.m_up, k_up: !!row.k_up,
-      quality_count: row.quality_count,
+      roe_up, m_up, k_up,
+      quality_count,
     },
     // S3 详情
     s3_detail: {
       revenue: [row.revenue_25, row.revenue_24, row.revenue_23, row.revenue_22, row.revenue_21],
       k_profit: [row.k_profit_25, row.k_profit_24, row.k_profit_23, row.k_profit_22, row.k_profit_21],
-      k_acc: !!row.k_acc, y_acc: !!row.y_acc,
+      k_acc, y_acc,
     },
     // S4 详情
     s4_detail: {
       inst_26q1: row.inst_26q1, inst_25q4: row.inst_25q4,
       inst_25q3: row.inst_25q3, inst_25q2: row.inst_25q2,
-      inst_d1: row.inst_d1, inst_d2: row.inst_d2, inst_d3: row.inst_d3,
-      s4_sub: !!row.s4_sub,
+      inst_d1: i1, inst_d2: i2, inst_d3: i3,
+      s4_sub,
     },
     // 基础信息
     main_business: row.main_business,
