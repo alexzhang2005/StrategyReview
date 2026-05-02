@@ -1,8 +1,9 @@
 /**
  * Cloudflare Cron Worker - 每日自动更新触发器
- * 
- * 每个交易日 18:00 CST（10:00 UTC）自动触发
- * 调用 Pages Functions API 执行实际的数据更新逻辑
+ *
+ * 每交易日 17:00-23:30 CST (09:00-15:30 UTC) 每 30 分钟触发一次。
+ * 若当日数据已发布 (status='published')，则跳过；否则调用 Pages API 拉取数据。
+ * 这样即使第一次触发时 A 股行情尚未收盘，后续会自动重试，直到数据完整为止。
  */
 
 export default {
@@ -11,16 +12,31 @@ export default {
     const pagesBase = env.PAGES_BASE_URL || 'https://strategy-review.pages.dev';
     const adminKey = env.ADMIN_KEY || '';
 
-    // 计算今天的日期（CST UTC+8）
+    // 计算当前 CST 日期 (UTC+8)
     const now = new Date();
     const cst = new Date(now.getTime() + 8 * 3600 * 1000);
     const dateStr = cst.toISOString().slice(0, 10).replace(/-/g, '');
 
-    // 跳过周末（1=Mon...5=Fri, 6=Sat, 0=Sun）
+    // 跳过周末
     const weekday = cst.getUTCDay();
     if (weekday === 0 || weekday === 6) {
       console.log(`[Cron] Skip weekend: ${dateStr}`);
       return;
+    }
+
+    // 检查今日数据是否已完整发布
+    try {
+      const checkResp = await fetch(`${pagesBase}/api/review/${dateStr}`);
+      if (checkResp.ok) {
+        const existing = await checkResp.json();
+        if (existing && existing.status === 'published' && existing.indices_json) {
+          console.log(`[Cron] ${dateStr} already published, skipping.`);
+          return;
+        }
+      }
+    } catch (e) {
+      // 检查失败不阻塞主流程，继续尝试更新
+      console.warn(`[Cron] Check failed: ${e.message}`);
     }
 
     console.log(`[Cron] Triggering daily update for ${dateStr}...`);
@@ -50,9 +66,10 @@ export default {
       return new Response(JSON.stringify({
         name: 'strategy-review-cron',
         status: 'running',
-        schedule: '每交易日 18:00 CST (10:00 UTC)',
+        schedule: '交易日 17:00-23:30 CST 每 30 分钟 (09:00-15:30 UTC)',
       }), { headers: { 'Content-Type': 'application/json' } });
     }
     return new Response('Method Not Allowed', { status: 405 });
   },
 };
+

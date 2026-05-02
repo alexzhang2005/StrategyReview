@@ -50,6 +50,9 @@ export async function onRequest(context) {
 
     // ===== 策略 =====
     if (path === '/strategy' && method === 'GET') return handleStrategySummary(env);
+    if (path === '/strategy/stocks' && method === 'GET') {
+      return handleStrategyStocksMulti(env, url);
+    }
     if (path.match(/^\/strategy\/(s1|s2|s3|s4|all3|any)$/) && method === 'GET') {
       return handleStrategyStocks(env, path.split('/')[2], url);
     }
@@ -207,7 +210,7 @@ async function handleStrategySummary(env) {
   });
 }
 
-// ==================== 策略股票列表 ====================
+// ==================== 策略股票列表（单策略，向后兼容）====================
 async function handleStrategyStocks(env, strategy, url) {
   const page = parseInt(url.searchParams.get('page') || '1');
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
@@ -227,12 +230,31 @@ async function handleStrategyStocks(env, strategy, url) {
   const where = colMap[strategy];
   if (!where) return err('Invalid strategy', 400);
 
-  const validSorts = ['code', 'name', 'industry', 'quality_count'];
-  const sortCol = validSorts.includes(sort) ? sort : 'code';
+  const validSorts = new Set([
+    'code', 'name', 'industry', 'quality_count',
+    'top10_26q1', 'top10_25q4', 'top10_25q3', 'top10_25q2', 'top10_25q1', 'top10_24q4',
+    'delta_26q1', 'delta_25q4', 'delta_25q3',
+    'roe_25', 'roe_24', 'roe_23', 'roe_22',
+    'margin_25', 'margin_24', 'margin_23', 'margin_22',
+    'net_profit_25', 'net_profit_24', 'net_profit_23', 'net_profit_22',
+    'revenue_25', 'revenue_24', 'revenue_23', 'revenue_22',
+    'k_profit_25', 'k_profit_24', 'k_profit_23', 'k_profit_22',
+    'inst_26q1', 'inst_25q4', 'inst_25q3', 'inst_25q2',
+    'inst_d1', 'inst_d2', 'inst_d3',
+  ]);
+  const sortCol = validSorts.has(sort) ? sort : 'code';
 
   const { results } = await env.DB.prepare(
     `SELECT code, name, industry, s1, s2, s3, s4, all_3, any_hit,
-            quality_count, k_acc, y_acc, s1_sub, concepts, pe, market_cap
+            quality_count, k_acc, y_acc, s1_sub, s4_sub, concepts, pe, market_cap,
+            top10_26q1, top10_25q4, top10_25q3, top10_25q2, top10_25q1, top10_24q4,
+            delta_26q1, delta_25q4, delta_25q3,
+            roe_25, roe_24, roe_23, roe_22,
+            margin_25, margin_24, margin_23, margin_22,
+            net_profit_25, net_profit_24, net_profit_23, net_profit_22,
+            revenue_25, revenue_24, revenue_23, revenue_22,
+            k_profit_25, k_profit_24, k_profit_23, k_profit_22,
+            inst_26q1, inst_25q4, inst_25q3, inst_25q2, inst_d1, inst_d2, inst_d3
      FROM stocks WHERE ${where}
      ORDER BY ${sortCol} ${order}
      LIMIT ? OFFSET ?`
@@ -244,6 +266,64 @@ async function handleStrategyStocks(env, strategy, url) {
 
   return json({
     strategy,
+    items: results || [],
+    total: total?.n || 0,
+    page,
+    limit,
+  });
+}
+
+// ==================== 策略股票列表（多策略 AND 筛选）====================
+async function handleStrategyStocksMulti(env, url) {
+  const page = parseInt(url.searchParams.get('page') || '1');
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
+  const offset = (page - 1) * limit;
+  const sort = url.searchParams.get('sort') || 'code';
+  const order = url.searchParams.get('order') === 'desc' ? 'DESC' : 'ASC';
+  const strategiesParam = url.searchParams.get('strategies') || 'any';
+
+  const allowedCols = { s1: 's1=1', s2: 's2=1', s3: 's3=1', s4: 's4=1', any: 'any_hit=1', all3: 'all_3=1' };
+  const parts = strategiesParam.split(',').map(s => s.trim()).filter(s => allowedCols[s]);
+  if (!parts.length) return err('Invalid strategies parameter', 400);
+
+  const where = parts.map(s => allowedCols[s]).join(' AND ');
+
+  const validSorts = new Set([
+    'code', 'name', 'industry', 'quality_count',
+    'top10_26q1', 'top10_25q4', 'top10_25q3', 'top10_25q2', 'top10_25q1', 'top10_24q4',
+    'delta_26q1', 'delta_25q4', 'delta_25q3',
+    'roe_25', 'roe_24', 'roe_23', 'roe_22',
+    'margin_25', 'margin_24', 'margin_23', 'margin_22',
+    'net_profit_25', 'net_profit_24', 'net_profit_23', 'net_profit_22',
+    'revenue_25', 'revenue_24', 'revenue_23', 'revenue_22',
+    'k_profit_25', 'k_profit_24', 'k_profit_23', 'k_profit_22',
+    'inst_26q1', 'inst_25q4', 'inst_25q3', 'inst_25q2',
+    'inst_d1', 'inst_d2', 'inst_d3',
+  ]);
+  const sortCol = validSorts.has(sort) ? sort : 'code';
+
+  const { results } = await env.DB.prepare(
+    `SELECT code, name, industry, s1, s2, s3, s4, all_3, any_hit,
+            quality_count, k_acc, y_acc, s1_sub, s4_sub, concepts, pe, market_cap,
+            top10_26q1, top10_25q4, top10_25q3, top10_25q2, top10_25q1, top10_24q4,
+            delta_26q1, delta_25q4, delta_25q3,
+            roe_25, roe_24, roe_23, roe_22,
+            margin_25, margin_24, margin_23, margin_22,
+            net_profit_25, net_profit_24, net_profit_23, net_profit_22,
+            revenue_25, revenue_24, revenue_23, revenue_22,
+            k_profit_25, k_profit_24, k_profit_23, k_profit_22,
+            inst_26q1, inst_25q4, inst_25q3, inst_25q2, inst_d1, inst_d2, inst_d3
+     FROM stocks WHERE ${where}
+     ORDER BY ${sortCol} ${order}
+     LIMIT ? OFFSET ?`
+  ).bind(limit, offset).all();
+
+  const total = await env.DB.prepare(
+    `SELECT COUNT(*) as n FROM stocks WHERE ${where}`
+  ).first();
+
+  return json({
+    strategies: parts,
     items: results || [],
     total: total?.n || 0,
     page,
@@ -296,6 +376,13 @@ async function handleStockDetail(env, code) {
       revenue: [row.revenue_25, row.revenue_24, row.revenue_23, row.revenue_22, row.revenue_21],
       k_profit: [row.k_profit_25, row.k_profit_24, row.k_profit_23, row.k_profit_22, row.k_profit_21],
       k_acc: !!row.k_acc, y_acc: !!row.y_acc,
+    },
+    // S4 详情
+    s4_detail: {
+      inst_26q1: row.inst_26q1, inst_25q4: row.inst_25q4,
+      inst_25q3: row.inst_25q3, inst_25q2: row.inst_25q2,
+      inst_d1: row.inst_d1, inst_d2: row.inst_d2, inst_d3: row.inst_d3,
+      s4_sub: !!row.s4_sub,
     },
     // 基础信息
     main_business: row.main_business,
