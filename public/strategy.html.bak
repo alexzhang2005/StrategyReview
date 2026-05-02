@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>选股策略 — StrategyReview</title>
+<link rel="stylesheet" href="/assets/css/main.css">
+<style>
+/* ── 策略卡片 ── */
+.strategy-cards {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+@media(max-width:900px){ .strategy-cards { grid-template-columns: repeat(3,1fr); } }
+@media(max-width:600px){ .strategy-cards { grid-template-columns: repeat(2,1fr); } }
+.s-card {
+  background: var(--bg2);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all .2s;
+  text-align: center;
+  position: relative;
+}
+.s-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: 14px 14px 0 0;
+  background: var(--c);
+  opacity: .5;
+}
+.s-card:hover { border-color: var(--c); transform: translateY(-2px); }
+.s-card.active { border-color: var(--c); background: var(--bg3); }
+.s-card.active::after { opacity: 1; }
+.s-card .s-icon { font-size: 22px; margin-bottom: 4px; }
+.s-card .s-name { font-size: 12px; font-weight: 700; color: var(--text); }
+.s-card .s-count { font-size: 11px; color: var(--sub); margin-top: 3px; }
+/* ── 多选筛选栏 ── */
+.multi-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: var(--bg2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.multi-filter label { font-size: 12px; color: var(--sub); white-space: nowrap; }
+.multi-check { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.multi-check input[type=checkbox] { accent-color: var(--gold); width: 14px; height: 14px; cursor: pointer; }
+.multi-check span { font-size: 12px; font-weight: 600; }
+.multi-filter .spacer { flex: 1; }
+/* ── 视图切换 ── */
+.view-toggle {
+  display: flex;
+  gap: 6px;
+}
+.vbtn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all .2s;
+}
+.vbtn.active { background: var(--gold); color: #000; border-color: var(--gold); font-weight: 700; }
+/* ── 工具栏 ── */
+.tool-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.tool-bar .sort-label { font-size: 12px; color: var(--sub); }
+/* ── 板块共振布局 ── */
+.sector-layout {
+  display: flex;
+  gap: 16px;
+  min-height: 500px;
+}
+.sector-sidebar {
+  width: 180px;
+  flex-shrink: 0;
+  background: var(--bg2);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 12px 8px;
+  overflow-y: auto;
+  max-height: 600px;
+}
+.sector-sidebar h4 {
+  font-size: 11px;
+  color: var(--sub);
+  padding: 0 8px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.sector-item {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sector-item:hover { background: var(--bg3); }
+.sector-item.active { background: rgba(255,215,0,0.12); color: var(--gold); font-weight: 600; }
+.sector-item .s-cnt { font-size: 11px; color: var(--sub); margin-left: 4px; }
+.sector-main { flex: 1; min-width: 0; }
+/* ── 表格 ── */
+.tbl-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+table.main-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 600px;
+}
+table.main-tbl th {
+  background: var(--bg2);
+  color: var(--sub);
+  padding: 8px 10px;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--border);
+}
+table.main-tbl th:first-child,
+table.main-tbl th:nth-child(2),
+table.main-tbl th:nth-child(3) { text-align: left; cursor: default; }
+table.main-tbl th.sorted { color: var(--gold); }
+table.main-tbl td {
+  padding: 7px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.main-tbl td:first-child,
+table.main-tbl td:nth-child(2),
+table.main-tbl td:nth-child(3) { text-align: left; }
+table.main-tbl tr:hover td { background: rgba(255,255,255,0.02); }
+.td-code { font-family: monospace; font-size: 13px; color: var(--blue); cursor: pointer; }
+.td-name { font-weight: 600; cursor: pointer; color: var(--text); max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+.td-name:hover { color: var(--gold); }
+.td-ind { font-size: 11px; color: var(--sub); max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+.td-num { color: var(--text); }
+.td-pos { color: var(--red); }
+.td-neg { color: var(--green); }
+.td-nil { color: var(--sub); }
+/* 万股单位 */
+.unit { font-size: 10px; color: var(--sub); }
+/* tag pills */
+.pill { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin: 1px; }
+.pill-blue { background: rgba(77,171,247,0.15); color: var(--blue); }
+.pill-green { background: rgba(81,207,102,0.15); color: var(--green); }
+.pill-red { background: rgba(255,107,107,0.15); color: var(--red); }
+.pill-gold { background: rgba(255,215,0,0.15); color: var(--gold); }
+.pill-purple { background: rgba(204,93,232,0.15); color: var(--purple); }
+</style>
+</head>
+<body>
+<div id="nav-container"></div>
+
+<div class="container">
+  <h1 class="page-title">选股策略</h1>
+  <p class="page-sub">基于财报数据筛选的量化策略股池，每季度更新</p>
+
+  <!-- 策略卡片 -->
+  <div class="strategy-cards" id="s-cards">
+    <div class="s-card" style="--c:#339af0" data-key="s1" onclick="selectCard('s1')">
+      <div class="s-icon">📦</div>
+      <div class="s-name">S1 持股增长</div>
+      <div class="s-count" id="cnt-s1">—</div>
+    </div>
+    <div class="s-card" style="--c:#51cf66" data-key="s2" onclick="selectCard('s2')">
+      <div class="s-icon">💹</div>
+      <div class="s-name">S2 盈利质量</div>
+      <div class="s-count" id="cnt-s2">—</div>
+    </div>
+    <div class="s-card" style="--c:#ff6b6b" data-key="s3" onclick="selectCard('s3')">
+      <div class="s-icon">🚀</div>
+      <div class="s-name">S3 全速前进</div>
+      <div class="s-count" id="cnt-s3">—</div>
+    </div>
+    <div class="s-card" style="--c:#cc5de8" data-key="s4" onclick="selectCard('s4')">
+      <div class="s-icon">🏛</div>
+      <div class="s-name">S4 机构持股</div>
+      <div class="s-count" id="cnt-s4">—</div>
+    </div>
+    <div class="s-card" style="--c:#ffd700" data-key="any" onclick="selectCard('any')">
+      <div class="s-icon">✨</div>
+      <div class="s-name">全部命中</div>
+      <div class="s-count" id="cnt-any">—</div>
+    </div>
+  </div>
+
+  <!-- 多选筛选 -->
+  <div class="multi-filter">
+    <label>多选AND筛选：</label>
+    <label class="multi-check">
+      <input type="checkbox" id="chk-s1" onchange="onMultiFilter()">
+      <span style="color:#4dabf7">S1</span>
+    </label>
+    <label class="multi-check">
+      <input type="checkbox" id="chk-s2" onchange="onMultiFilter()">
+      <span style="color:#51cf66">S2</span>
+    </label>
+    <label class="multi-check">
+      <input type="checkbox" id="chk-s3" onchange="onMultiFilter()">
+      <span style="color:#ff6b6b">S3</span>
+    </label>
+    <label class="multi-check">
+      <input type="checkbox" id="chk-s4" onchange="onMultiFilter()">
+      <span style="color:#cc5de8">S4</span>
+    </label>
+    <div class="spacer"></div>
+    <div class="view-toggle">
+      <button class="vbtn active" id="vbtn-list" onclick="switchView('list')">🗂 股票列表</button>
+      <button class="vbtn" id="vbtn-sector" onclick="switchView('sector')">📊 板块共振</button>
+    </div>
+  </div>
+
+  <!-- 工具栏 -->
+  <div class="tool-bar">
+    <input class="search-input" style="width:200px" id="search-input"
+      placeholder="搜索代码/名称/行业..." oninput="onSearch()">
+    <span class="sort-label" id="total-label"></span>
+    <div style="margin-left:auto;display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="exportCsv()">📥 导出CSV</button>
+    </div>
+  </div>
+
+  <!-- 股票列表视图 -->
+  <div id="view-list">
+    <div class="tbl-wrap">
+      <table class="main-tbl" id="main-tbl">
+        <thead id="tbl-head"></thead>
+        <tbody id="tbl-body">
+          <tr><td colspan="20"><div class="loading"><div class="spinner"></div>加载中...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="pagination"></div>
+  </div>
+
+  <!-- 板块共振视图 -->
+  <div id="view-sector" style="display:none">
+    <div class="sector-layout">
+      <div class="sector-sidebar">
+        <h4>行业板块</h4>
+        <div id="sector-list"></div>
+      </div>
+      <div class="sector-main">
+        <div class="tbl-wrap">
+          <table class="main-tbl" id="sector-tbl">
+            <thead id="sector-tbl-head"></thead>
+            <tbody id="sector-tbl-body">
+              <tr><td colspan="20"><div class="loading"><div class="spinner"></div>加载中...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/components.js"></script>
+<script>
+document.getElementById('nav-container').innerHTML = renderNav('strategy');
+initNavStatus();
+
+// ── 状态 ──
+let currentCard = 's1';      // 当前激活的卡片
+let multiMode = false;        // 是否多选模式
+let multiSelected = [];       // 多选的策略列表
+let currentView = 'list';
+let sortState = { col: null, order: 'asc' };
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let searchTimer;
+let allStocks = [];
+let filteredStocks = [];
+let currentSector = null;    // 当前板块筛选
+
+// ── 策略表头配置 ──
+const COL_DEFS = {
+  s1: [
+    { key: 'code', label: '代码', align: 'left', sortable: false },
+    { key: 'name', label: '名称', align: 'left', sortable: false },
+    { key: 'industry', label: '行业', align: 'left', sortable: false },
+    { key: 'top10_26q1', label: '26Q1持股(万)', sortable: true },
+    { key: 'top10_25q4', label: '25Q4', sortable: true },
+    { key: 'top10_25q3', label: '25Q3', sortable: true },
+    { key: 'top10_25q2', label: '25Q2', sortable: true },
+    { key: 'top10_25q1', label: '25Q1', sortable: true },
+    { key: 'top10_24q4', label: '24Q4', sortable: true },
+    { key: 'delta_26q1', label: 'Δ26Q1', sortable: true },
+    { key: 'delta_25q4', label: 'Δ25Q4', sortable: true },
+    { key: 'delta_25q3', label: 'Δ25Q3', sortable: true },
+    { key: '_sub', label: '子策略', sortable: false },
+    { key: '_tags', label: '策略标签', sortable: false },
+  ],
+  s2: [
+    { key: 'code', label: '代码', align: 'left', sortable: false },
+    { key: 'name', label: '名称', align: 'left', sortable: false },
+    { key: 'industry', label: '行业', align: 'left', sortable: false },
+    { key: 'roe_25', label: 'ROE25', sortable: true },
+    { key: 'roe_24', label: 'ROE24', sortable: true },
+    { key: 'roe_23', label: 'ROE23', sortable: true },
+    { key: 'roe_22', label: 'ROE22', sortable: true },
+    { key: 'margin_25', label: '毛利率25', sortable: true },
+    { key: 'margin_24', label: '24', sortable: true },
+    { key: 'margin_23', label: '23', sortable: true },
+    { key: 'margin_22', label: '22', sortable: true },
+    { key: 'net_profit_25', label: '扣非净利25(万)', sortable: true },
+    { key: 'net_profit_24', label: '24', sortable: true },
+    { key: 'net_profit_23', label: '23', sortable: true },
+    { key: 'net_profit_22', label: '22', sortable: true },
+    { key: 'quality_count', label: '质量分', sortable: true },
+  ],
+  s3: [
+    { key: 'code', label: '代码', align: 'left', sortable: false },
+    { key: 'name', label: '名称', align: 'left', sortable: false },
+    { key: 'industry', label: '行业', align: 'left', sortable: false },
+    { key: 'revenue_25', label: '营收25(万)', sortable: true },
+    { key: 'revenue_24', label: '24', sortable: true },
+    { key: 'revenue_23', label: '23', sortable: true },
+    { key: 'revenue_22', label: '22', sortable: true },
+    { key: '_rev_g', label: '营收增速', sortable: false },
+    { key: 'k_profit_25', label: '扣非净利25(万)', sortable: true },
+    { key: 'k_profit_24', label: '24', sortable: true },
+    { key: 'k_profit_23', label: '23', sortable: true },
+    { key: 'k_profit_22', label: '22', sortable: true },
+    { key: '_kp_g', label: '净利增速', sortable: false },
+  ],
+  s4: [
+    { key: 'code', label: '代码', align: 'left', sortable: false },
+    { key: 'name', label: '名称', align: 'left', sortable: false },
+    { key: 'industry', label: '行业', align: 'left', sortable: false },
+    { key: 'inst_26q1', label: '机构26Q1(万)', sortable: true },
+    { key: 'inst_25q4', label: '25Q4', sortable: true },
+    { key: 'inst_25q3', label: '25Q3', sortable: true },
+    { key: 'inst_25q2', label: '25Q2', sortable: true },
+    { key: 'inst_d1', label: 'Δ26Q1', sortable: true },
+    { key: 'inst_d2', label: 'Δ25Q4', sortable: true },
+    { key: 'inst_d3', label: 'Δ25Q3', sortable: true },
+    { key: '_sub4', label: '子策略', sortable: false },
+  ],
+  any: [
+    { key: 'code', label: '代码', align: 'left', sortable: false },
+    { key: 'name', label: '名称', align: 'left', sortable: false },
+    { key: 'industry', label: '行业', align: 'left', sortable: false },
+    { key: '_s_tags', label: '命中策略', sortable: false },
+    { key: 'quality_count', label: '质量分', sortable: true },
+    { key: 'top10_26q1', label: '持股26Q1(万)', sortable: true },
+    { key: 'roe_25', label: 'ROE25', sortable: true },
+    { key: 'revenue_25', label: '营收25(万)', sortable: true },
+    { key: 'inst_26q1', label: '机构26Q1(万)', sortable: true },
+  ],
+};
+// 多选时用 any 的列
+const MULTI_COLS = COL_DEFS.any;
+
+// ── 格式化工具 ──
+const W = 10000; // 万
+function fmtWan(v) {
+  if (v == null) return '<span class="td-nil">—</span>';
+  return `<span class="td-num">${(v/W).toFixed(1)}</span>`;
+}
+function fmtPct(v) {
+  if (v == null) return '<span class="td-nil">—</span>';
+  const pct = (v * 100).toFixed(1);
+  const cls = v > 0 ? 'td-pos' : v < 0 ? 'td-neg' : 'td-nil';
+  return `<span class="${cls}">${v > 0 ? '+' : ''}${pct}%</span>`;
+}
+function fmtNum(v, decimals=2) {
+  if (v == null) return '<span class="td-nil">—</span>';
+  return `<span class="td-num">${Number(v).toFixed(decimals)}</span>`;
+}
+function fmtDelta(v) {
+  if (v == null) return '<span class="td-nil">—</span>';
+  const sign = v > 0 ? '+' : '';
+  const cls = v > 0 ? 'td-pos' : v < 0 ? 'td-neg' : 'td-nil';
+  return `<span class="${cls}">${sign}${(v/W).toFixed(1)}</span>`;
+}
+
+function calcGrowth(curr, prev) {
+  if (curr == null || prev == null || prev === 0) return null;
+  return (curr - prev) / Math.abs(prev);
+}
+
+// ── 渲染单元格 ──
+function renderCell(key, s) {
+  switch (key) {
+    case 'code':
+      return `<td class="td-code" onclick="goToStock('${s.code}')">${s.code}</td>`;
+    case 'name':
+      return `<td><span class="td-name" onclick="goToStock('${s.code}')" title="${s.name}">${s.name}</span></td>`;
+    case 'industry':
+      return `<td class="td-ind" title="${s.industry||''}">${s.industry||'-'}</td>`;
+    case 'top10_26q1': return `<td>${fmtWan(s.top10_26q1)}</td>`;
+    case 'top10_25q4': return `<td>${fmtWan(s.top10_25q4)}</td>`;
+    case 'top10_25q3': return `<td>${fmtWan(s.top10_25q3)}</td>`;
+    case 'top10_25q2': return `<td>${fmtWan(s.top10_25q2)}</td>`;
+    case 'top10_25q1': return `<td>${fmtWan(s.top10_25q1)}</td>`;
+    case 'top10_24q4': return `<td>${fmtWan(s.top10_24q4)}</td>`;
+    case 'delta_26q1': return `<td>${fmtDelta(s.delta_26q1)}</td>`;
+    case 'delta_25q4': return `<td>${fmtDelta(s.delta_25q4)}</td>`;
+    case 'delta_25q3': return `<td>${fmtDelta(s.delta_25q3)}</td>`;
+    case 'roe_25': return `<td>${fmtNum(s.roe_25,2)}</td>`;
+    case 'roe_24': return `<td>${fmtNum(s.roe_24,2)}</td>`;
+    case 'roe_23': return `<td>${fmtNum(s.roe_23,2)}</td>`;
+    case 'roe_22': return `<td>${fmtNum(s.roe_22,2)}</td>`;
+    case 'margin_25': return `<td>${fmtNum(s.margin_25,2)}</td>`;
+    case 'margin_24': return `<td>${fmtNum(s.margin_24,2)}</td>`;
+    case 'margin_23': return `<td>${fmtNum(s.margin_23,2)}</td>`;
+    case 'margin_22': return `<td>${fmtNum(s.margin_22,2)}</td>`;
+    case 'net_profit_25': return `<td>${fmtWan(s.net_profit_25)}</td>`;
+    case 'net_profit_24': return `<td>${fmtWan(s.net_profit_24)}</td>`;
+    case 'net_profit_23': return `<td>${fmtWan(s.net_profit_23)}</td>`;
+    case 'net_profit_22': return `<td>${fmtWan(s.net_profit_22)}</td>`;
+    case 'revenue_25': return `<td>${fmtWan(s.revenue_25)}</td>`;
+    case 'revenue_24': return `<td>${fmtWan(s.revenue_24)}</td>`;
+    case 'revenue_23': return `<td>${fmtWan(s.revenue_23)}</td>`;
+    case 'revenue_22': return `<td>${fmtWan(s.revenue_22)}</td>`;
+    case 'k_profit_25': return `<td>${fmtWan(s.k_profit_25)}</td>`;
+    case 'k_profit_24': return `<td>${fmtWan(s.k_profit_24)}</td>`;
+    case 'k_profit_23': return `<td>${fmtWan(s.k_profit_23)}</td>`;
+    case 'k_profit_22': return `<td>${fmtWan(s.k_profit_22)}</td>`;
+    case 'inst_26q1': return `<td>${fmtWan(s.inst_26q1)}</td>`;
+    case 'inst_25q4': return `<td>${fmtWan(s.inst_25q4)}</td>`;
+    case 'inst_25q3': return `<td>${fmtWan(s.inst_25q3)}</td>`;
+    case 'inst_25q2': return `<td>${fmtWan(s.inst_25q2)}</td>`;
+    case 'inst_d1': return `<td>${fmtDelta(s.inst_d1)}</td>`;
+    case 'inst_d2': return `<td>${fmtDelta(s.inst_d2)}</td>`;
+    case 'inst_d3': return `<td>${fmtDelta(s.inst_d3)}</td>`;
+    case 'quality_count':
+      return `<td>${s.quality_count > 0 ? `<span class="td-pos">${s.quality_count}/3</span>` : '<span class="td-nil">0</span>'}</td>`;
+    case '_rev_g': {
+      const g = calcGrowth(s.revenue_25, s.revenue_24);
+      return `<td>${fmtPct(g)}</td>`;
+    }
+    case '_kp_g': {
+      const g = calcGrowth(s.k_profit_25, s.k_profit_24);
+      return `<td>${fmtPct(g)}</td>`;
+    }
+    case '_sub':
+      return `<td>${s.s1_sub ? '<span class="pill pill-blue">增速↑</span>' : '<span class="td-nil">—</span>'}</td>`;
+    case '_sub4':
+      return `<td>${s.s4_sub ? '<span class="pill pill-purple">增速↑</span>' : '<span class="td-nil">—</span>'}</td>`;
+    case '_tags': {
+      const tags = [];
+      if (s.k_acc) tags.push('<span class="pill pill-red">净利↑</span>');
+      if (s.y_acc) tags.push('<span class="pill pill-blue">营收↑</span>');
+      return `<td>${tags.join('') || '<span class="td-nil">—</span>'}</td>`;
+    }
+    case '_s_tags': {
+      const t = [];
+      if (s.s1) t.push('<span class="pill pill-blue">S1</span>');
+      if (s.s2) t.push('<span class="pill pill-green">S2</span>');
+      if (s.s3) t.push('<span class="pill pill-red">S3</span>');
+      if (s.s4) t.push('<span class="pill pill-purple">S4</span>');
+      return `<td>${t.join('')}</td>`;
+    }
+    default:
+      return `<td>—</td>`;
+  }
+}
+
+// ── 渲染表头 ──
+function buildHeader(cols, tbodyId) {
+  const headId = tbodyId === 'tbl-body' ? 'tbl-head' : 'sector-tbl-head';
+  const head = document.getElementById(headId);
+  head.innerHTML = '<tr>' + cols.map(c => {
+    if (!c.sortable) return `<th style="${c.align==='left'?'text-align:left':''}">${c.label}</th>`;
+    const isSorted = sortState.col === c.key;
+    const arrow = isSorted ? (sortState.order === 'asc' ? ' ↑' : ' ↓') : '';
+    return `<th class="${isSorted?'sorted':''}" onclick="toggleSort('${c.key}','${tbodyId}')">${c.label}${arrow}</th>`;
+  }).join('') + '</tr>';
+}
+
+// ── 初始化 ──
+async function initPage() {
+  try {
+    const summary = await api.getStrategySummary();
+    const c = summary.counts || {};
+    document.getElementById('cnt-s1').textContent = (c.s1_count||0) + ' 只';
+    document.getElementById('cnt-s2').textContent = (c.s2_count||0) + ' 只';
+    document.getElementById('cnt-s3').textContent = (c.s3_count||0) + ' 只';
+    document.getElementById('cnt-s4').textContent = (c.s4_count||0) + ' 只';
+    document.getElementById('cnt-any').textContent = (c.any_count||0) + ' 只';
+  } catch(e) {}
+
+  const tab = new URLSearchParams(location.search).get('tab') || 's1';
+  selectCard(tab);
+}
+
+// ── 卡片选择 ──
+function selectCard(key) {
+  currentCard = key;
+  multiMode = false;
+  // 取消所有多选框
+  ['s1','s2','s3','s4'].forEach(k => { document.getElementById('chk-'+k).checked = false; });
+  document.querySelectorAll('.s-card').forEach(c => c.classList.remove('active'));
+  const el = document.querySelector(`[data-key="${key}"]`);
+  if (el) el.classList.add('active');
+  sortState = { col: null, order: 'asc' };
+  currentPage = 1;
+  currentSector = null;
+  loadStocks();
+}
+
+// ── 多选筛选 ──
+function onMultiFilter() {
+  const checked = ['s1','s2','s3','s4'].filter(k => document.getElementById('chk-'+k).checked);
+  if (checked.length === 0) {
+    // 恢复卡片模式
+    document.querySelectorAll('.s-card').forEach(c => c.classList.remove('active'));
+    const el = document.querySelector(`[data-key="${currentCard}"]`);
+    if (el) el.classList.add('active');
+    multiMode = false;
+    multiSelected = [];
+  } else {
+    multiMode = true;
+    multiSelected = checked;
+    document.querySelectorAll('.s-card').forEach(c => c.classList.remove('active'));
+  }
+  sortState = { col: null, order: 'asc' };
+  currentPage = 1;
+  currentSector = null;
+  loadStocks();
+}
+
+// ── 视图切换 ──
+function switchView(v) {
+  currentView = v;
+  document.getElementById('vbtn-list').classList.toggle('active', v === 'list');
+  document.getElementById('vbtn-sector').classList.toggle('active', v === 'sector');
+  document.getElementById('view-list').style.display = v === 'list' ? '' : 'none';
+  document.getElementById('view-sector').style.display = v === 'sector' ? '' : 'none';
+  if (v === 'sector') renderSectorView();
+}
+
+// ── 加载股票 ──
+async function loadStocks(page = 1) {
+  currentPage = page;
+  const colDef = multiMode ? MULTI_COLS : (COL_DEFS[currentCard] || MULTI_COLS);
+  const sortCol = sortState.col || null;
+  const bodyId = 'tbl-body';
+
+  if (currentView === 'list') buildHeader(colDef, bodyId);
+
+  const tbody = document.getElementById(bodyId);
+  const colspan = colDef.length;
+  tbody.innerHTML = `<tr><td colspan="${colspan}">${loadingHtml()}</td></tr>`;
+  document.getElementById('total-label').textContent = '';
+
+  try {
+    let data;
+    if (multiMode && multiSelected.length > 0) {
+      data = await api.get('/strategy/stocks', {
+        strategies: multiSelected.join(','),
+        page, limit: PAGE_SIZE,
+        sort: sortCol || 'code',
+        order: sortState.order,
+      });
+    } else {
+      data = await api.getStrategyStocks(
+        currentCard, page, PAGE_SIZE,
+        sortCol || 'code', sortState.order
+      );
+    }
+
+    allStocks = data.items || [];
+    document.getElementById('total-label').textContent =
+      `共 ${data.total} 只 (第${page}/${Math.ceil(data.total/PAGE_SIZE)}页)`;
+
+    applySearch();
+
+    document.getElementById('pagination').innerHTML =
+      renderPagination(data.total, page, PAGE_SIZE, 'loadStocks');
+
+    if (currentView === 'sector') renderSectorView();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="${colspan}">${emptyHtml('加载失败', e.message)}</td></tr>`;
+  }
+}
+
+// ── 搜索 ──
+function applySearch() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  filteredStocks = q
+    ? allStocks.filter(s =>
+        s.code.includes(q) || (s.name||'').toLowerCase().includes(q) ||
+        (s.industry||'').toLowerCase().includes(q))
+    : allStocks;
+  if (currentSector) {
+    filteredStocks = filteredStocks.filter(s => (s.industry||'').startsWith(currentSector));
+  }
+  renderTableRows();
+}
+function onSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applySearch, 200);
+}
+
+// ── 渲染表格行 ──
+function renderTableRows() {
+  const colDef = multiMode ? MULTI_COLS : (COL_DEFS[currentCard] || MULTI_COLS);
+  const tbody = document.getElementById('tbl-body');
+  if (!filteredStocks.length) {
+    tbody.innerHTML = `<tr><td colspan="${colDef.length}">${emptyHtml('没有找到股票')}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filteredStocks.map(s =>
+    '<tr>' + colDef.map(c => renderCell(c.key, s)).join('') + '</tr>'
+  ).join('');
+}
+
+// ── 排序 ──
+function toggleSort(col, bodyId) {
+  sortState.order = (sortState.col === col && sortState.order === 'asc') ? 'desc' : 'asc';
+  sortState.col = col;
+  loadStocks(currentPage);
+}
+
+// ── 板块共振视图 ──
+function renderSectorView() {
+  const colDef = multiMode ? MULTI_COLS : (COL_DEFS[currentCard] || MULTI_COLS);
+  buildHeader(colDef, 'sector-tbl-body');
+
+  // 统计各板块数量（按一级分类）
+  const sectorMap = {};
+  allStocks.forEach(s => {
+    const ind = (s.industry || '').split('-')[0] || '其他';
+    sectorMap[ind] = (sectorMap[ind] || []);
+    sectorMap[ind].push(s);
+  });
+  const sectors = Object.entries(sectorMap).sort((a,b) => b[1].length - a[1].length);
+
+  // 渲染侧边栏
+  const sideEl = document.getElementById('sector-list');
+  sideEl.innerHTML = [
+    `<div class="sector-item ${!currentSector?'active':''}" onclick="filterSector(null)">
+      <span>全部</span><span class="s-cnt">${allStocks.length}</span>
+    </div>`,
+    ...sectors.map(([ind, stocks]) =>
+      `<div class="sector-item ${currentSector===ind?'active':''}" onclick="filterSector('${ind}')">
+        <span style="overflow:hidden;text-overflow:ellipsis">${ind}</span>
+        <span class="s-cnt">${stocks.length}</span>
+      </div>`)
+  ].join('');
+
+  // 渲染表格
+  const source = currentSector
+    ? allStocks.filter(s => (s.industry||'').startsWith(currentSector))
+    : allStocks;
+  const tbody = document.getElementById('sector-tbl-body');
+  if (!source.length) {
+    tbody.innerHTML = `<tr><td colspan="${colDef.length}">${emptyHtml('没有股票')}</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = source.map(s =>
+    '<tr>' + colDef.map(c => renderCell(c.key, s)).join('') + '</tr>'
+  ).join('');
+}
+
+function filterSector(ind) {
+  currentSector = ind;
+  renderSectorView();
+}
+
+// ── 导出 CSV ──
+function exportCsv() {
+  if (!allStocks.length) { showToast('没有数据', 'err'); return; }
+  const rows = [['代码','名称','行业','S1','S2','S3','S4']];
+  allStocks.forEach(s => rows.push([s.code,s.name,s.industry||'',s.s1?1:0,s.s2?1:0,s.s3?1:0,s.s4?1:0]));
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\ufeff'+csv);
+  a.download = `strategy_${currentCard}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  showToast('已导出 CSV');
+}
+
+initPage();
+</script>
+</body>
+</html>
+
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.stab-btn {
+  padding: 8px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--sub);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+.stab-btn:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+.stab-btn.active-gold   { color: #000; background: var(--gold); border-color: var(--gold); }
+.stab-btn.active-blue   { color: #fff; background: var(--blue); border-color: var(--blue); }
+.stab-btn.active-green  { color: #fff; background: var(--green); border-color: var(--green); }
+.stab-btn.active-red    { color: #fff; background: var(--red); border-color: var(--red); }
+.stab-btn.active-any    { color: var(--gold); border-color: var(--gold); background: rgba(255,215,0,0.1); }
+.strategy-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.filter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.stats-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.stat-pill {
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+}
+</style>
+</head>
+<body>
+<div id="nav-container"></div>
+
+<div class="container">
+  <h1 class="page-title">选股策略</h1>
+  <p class="page-sub">基于财报数据筛选的量化策略股池，每季度更新</p>
+
+  <!-- 策略选项卡 -->
+  <div class="strategy-tabs" id="strategy-tabs">
+    <button class="stab-btn" data-strategy="all3"  data-active="active-gold"  onclick="switchStrategy('all3',this)">🏆 三合一</button>
+    <button class="stab-btn" data-strategy="s1"    data-active="active-blue"  onclick="switchStrategy('s1',this)">📦 持股增长</button>
+    <button class="stab-btn" data-strategy="s2"    data-active="active-green" onclick="switchStrategy('s2',this)">💹 盈利质量</button>
+    <button class="stab-btn" data-strategy="s3"    data-active="active-red"   onclick="switchStrategy('s3',this)">🚀 全速前进</button>
+    <button class="stab-btn" data-strategy="any"   data-active="active-any"   onclick="switchStrategy('any',this)">✨ 全部命中</button>
+  </div>
+
+  <!-- 统计数字 -->
+  <div class="stats-row" id="stats-row">
+    <div class="loading"><div class="spinner"></div>加载中...</div>
+  </div>
+
+  <!-- 标题 + 搜索 -->
+  <div class="strategy-header">
+    <div id="strategy-title" style="font-size:16px;font-weight:700;color:var(--gold)"></div>
+    <div class="filter-row">
+      <input class="search-input" style="width:200px" id="search-input"
+        placeholder="搜索代码/名称/行业..." oninput="onSearch()">
+      <button class="btn btn-outline btn-sm" onclick="exportCsv()">📥 导出CSV</button>
+    </div>
+  </div>
+
+  <!-- 表格 -->
+  <div class="table-wrapper">
+    <table id="strategy-table">
+      <thead>
+        <tr>
+          <th data-sort="code"     data-label="代码">代码 ↑</th>
+          <th data-sort="name"     data-label="名称">名称</th>
+          <th data-sort="industry" data-label="行业">行业</th>
+          <th>策略标签</th>
+          <th data-sort="quality_count" data-label="质量分">盈利质量</th>
+          <th>增速</th>
+        </tr>
+      </thead>
+      <tbody id="strategy-body">
+        <tr><td colspan="6"><div class="loading"><div class="spinner"></div>加载中...</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div id="strategy-pagination"></div>
+</div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/components.js"></script>
+<script>
+document.getElementById('nav-container').innerHTML = renderNav('strategy');
+initNavStatus();
+
+let currentStrategy = 'all3';
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let sortState = { col: 'code', order: 'asc' };
+let searchTimer;
+let allStocks = [];
+let filteredStocks = [];
+
+const strategyNames = {
+  all3: '三合一策略',
+  s1: '持股增长（S1）',
+  s2: '盈利质量（S2）',
+  s3: '全速前进（S3）',
+  any: '任意策略命中',
+};
+
+const strategyDescs = {
+  all3: 'S1+S2+S3 同时命中，最强基本面信号',
+  s1: '十大股东三季度连续增持',
+  s2: 'ROE、毛利率、扣非净利三年同时递增',
+  s3: '扣非净利增速 + 营收增速双加速',
+  any: '命中一个或多个策略的全部股票',
+};
+
+// 初始化
+async function initPage() {
+  try {
+    const summary = await api.getStrategySummary();
+    const c = summary.counts || {};
+    const counts = { all3: c.all3_count, s1: c.s1_count, s2: c.s2_count, s3: c.s3_count, any: c.any_count };
+
+    document.getElementById('stats-row').innerHTML = Object.entries({
+      all3: ['🏆 三合一', 'gold'],
+      s1:   ['📦 持股增长', 'blue'],
+      s2:   ['💹 盈利质量', 'green'],
+      s3:   ['🚀 全速前进', 'red'],
+    }).map(([k, [label, color]]) => `
+      <div class="stat-pill" style="color:var(--${color})" onclick="switchStrategyByKey('${k}')">
+        ${label}: <strong>${counts[k] || 0}</strong> 只
+      </div>`).join('');
+
+    // 读取 URL 参数
+    const tab = new URLSearchParams(location.search).get('tab') || 'all3';
+    switchStrategyByKey(tab);
+  } catch (e) {
+    document.getElementById('stats-row').innerHTML = `<span style="color:var(--sub)">${e.message}</span>`;
+  }
+}
+
+function switchStrategyByKey(key) {
+  const btn = document.querySelector(`[data-strategy="${key}"]`);
+  if (btn) switchStrategy(key, btn);
+}
+
+function switchStrategy(strategy, btn) {
+  currentStrategy = strategy;
+  currentPage = 1;
+  allStocks = [];
+
+  // 更新按钮样式
+  document.querySelectorAll('.stab-btn').forEach(b => {
+    b.classList.remove('active-gold', 'active-blue', 'active-green', 'active-red', 'active-any');
+  });
+  if (btn) btn.classList.add(btn.dataset.active);
+
+  // 更新标题
+  document.getElementById('strategy-title').textContent =
+    `${strategyNames[strategy]} — ${strategyDescs[strategy]}`;
+
+  loadStocks();
+}
+
+async function loadStocks(page = 1) {
+  currentPage = page;
+  const tbody = document.getElementById('strategy-body');
+  tbody.innerHTML = `<tr><td colspan="6">${loadingHtml()}</td></tr>`;
+
+  try {
+    const data = await api.getStrategyStocks(
+      currentStrategy, page, PAGE_SIZE, sortState.col, sortState.order
+    );
+
+    allStocks = data.items || [];
+    filteredStocks = allStocks;
+    applySearch();
+
+    // 分页
+    document.getElementById('strategy-pagination').innerHTML =
+      renderPagination(data.total, page, PAGE_SIZE, 'loadStocks');
+
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6">${emptyHtml('加载失败', e.message)}</td></tr>`;
+  }
+}
+
+function applySearch() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  filteredStocks = q
+    ? allStocks.filter(s =>
+        s.code.includes(q) || (s.name || '').toLowerCase().includes(q) ||
+        (s.industry || '').toLowerCase().includes(q))
+    : allStocks;
+  renderTable();
+}
+
+function onSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applySearch, 200);
+}
+
+function renderTable() {
+  const tbody = document.getElementById('strategy-body');
+  if (!filteredStocks.length) {
+    tbody.innerHTML = `<tr><td colspan="6">${emptyHtml('没有找到匹配股票')}</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = filteredStocks.map(s => {
+    const parse = (v) => { try { return v ? JSON.parse(v) : []; } catch { return []; } };
+    const concepts = parse(s.concepts);
+    const conceptStr = concepts.slice(0, 2).join(' / ');
+
+    return `
+      <tr class="${s.all_3 ? 'tr-hit' : ''}">
+        <td class="stock-code">${s.code}</td>
+        <td class="stock-name" onclick="goToStock('${s.code}')" title="${s.name}">${s.name}</td>
+        <td style="color:var(--sub);font-size:12px">${s.industry || '-'}</td>
+        <td>${strategyTags(s)}</td>
+        <td>
+          <div style="font-size:12px">
+            ${s.quality_count > 0 ? `<span style="color:var(--green)">${s.quality_count}/3 项达标</span>` : '-'}
+          </div>
+        </td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${s.k_acc ? '<span class="tag tag-red" style="font-size:10px">净利加速</span>' : ''}
+            ${s.y_acc ? '<span class="tag tag-blue" style="font-size:10px">营收加速</span>' : ''}
+            ${s.s1_sub ? '<span class="tag tag-gold" style="font-size:10px">增速加速</span>' : ''}
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+// 表格排序
+document.querySelectorAll('#strategy-table th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.sort;
+    sortState.order = (sortState.col === col && sortState.order === 'asc') ? 'desc' : 'asc';
+    sortState.col = col;
+    document.querySelectorAll('#strategy-table th').forEach(t => {
+      t.classList.remove('th-sorted');
+      t.textContent = t.dataset.label || t.textContent.replace(/ [↑↓]$/, '');
+    });
+    th.classList.add('th-sorted');
+    th.textContent = th.dataset.label + (sortState.order === 'asc' ? ' ↑' : ' ↓');
+    loadStocks(1);
+  });
+});
+
+// 导出 CSV
+function exportCsv() {
+  if (!filteredStocks.length) { showToast('没有数据可导出', 'err'); return; }
+  const rows = [['代码', '名称', '行业', 'S1', 'S2', 'S3', '三合一']];
+  filteredStocks.forEach(s => rows.push([s.code, s.name, s.industry||'', s.s1?1:0, s.s2?1:0, s.s3?1:0, s.all_3?1:0]));
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('\ufeff' + csv);
+  a.download = `strategy_${currentStrategy}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  showToast('已导出 CSV');
+}
+
+initPage();
+</script>
+</body>
+</html>

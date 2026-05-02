@@ -606,10 +606,10 @@ async function handleUploadSelection(env, request) {
   // 插入列表记录
   const now = new Date().toISOString();
   const listResult = await env.DB.prepare(
-    "INSERT INTO selection_lists (date, filename, list_name, total_count, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id"
-  ).bind(today, filename || null, name, codes.length, now).first();
+    "INSERT INTO selection_lists (date, filename, list_name, total_count, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).bind(today, filename || null, name, codes.length, now).run();
 
-  const listId = listResult?.id;
+  const listId = listResult.meta?.last_row_id;
   if (!listId) return err('Failed to create list');
 
   // 插入股票
